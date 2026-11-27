@@ -36,26 +36,62 @@ function writeUpdateFile(string $name, string $contents): void
     }
 }
 
-function queueGitUpdate(string $action, string $installed): void
+function releaseProgramLockForUpdate(): void
 {
-    $lock = fopen(portalPrivatePath('data/update-queue.lock'), 'c');
-    if (!$lock || !flock($lock, LOCK_EX)) {
-        throw new RuntimeException('Die Update-Anfrage kann nicht gespeichert werden.');
+    if (function_exists('portalProgramLock')) {
+        portalProgramLock(true);
+        return;
     }
-    try {
-        if (readUpdateState('request.json')) {
-            throw new InvalidArgumentException('Es ist bereits eine Update-Anfrage vorgemerkt.');
-        }
-        $request = ['action' => $action];
-        if ($action === 'install') {
-            $candidate = readUpdateState('status.json');
-            if (empty($candidate['available']) || !version_compare($candidate['version'], $installed, '>')) {
-                throw new InvalidArgumentException('Prüfen Sie zuerst, ob eine neuere Version verfügbar ist.');
-            }
-            $request['commit'] = $candidate['commit'];
-        }
-        writeUpdateFile('request.json', json_encode($request, JSON_THROW_ON_ERROR));
-    } finally {
+
+    // Installations updated from 1.0.x may still use the original entry point.
+    $entry = new ReflectionFunction('portalEntry');
+    $lock = $entry->getStaticVariables()['lock'] ?? null;
+    if (is_resource($lock)) {
         fclose($lock);
+    }
+}
+
+function applyGitUpdateFromPortal(array $config): void
+{
+    if (!function_exists('proc_open')) {
+        throw new RuntimeException('Web-PHP muss proc_open zulassen, damit das Portal Git-Updates starten kann.');
+    }
+    $php = $config['update_php'] ?? 'php';
+    if (!is_string($php) || $php === '' || str_contains($php, "\0")) {
+        throw new RuntimeException('Der PHP-CLI-Pfad in private/config.php ist ungültig.');
+    }
+    $output = tmpfile();
+    if ($output === false) {
+        throw new RuntimeException('Das temporäre Updateprotokoll konnte nicht angelegt werden.');
+    }
+    $errors = tmpfile();
+    if ($errors === false) {
+        fclose($output);
+        throw new RuntimeException('Das temporäre Updateprotokoll konnte nicht angelegt werden.');
+    }
+
+    try {
+        $command = [$php, portalPrivatePath('update.php'), '--apply'];
+        $process = @proc_open($command, [0 => ['pipe', 'r'], 1 => $output, 2 => $errors], $pipes, TICKET_PORTAL_HOME);
+        if (!is_resource($process)) {
+            throw new RuntimeException('Der PHP-CLI-Prozess konnte nicht gestartet werden.');
+        }
+        fclose($pipes[0]);
+        if (proc_close($process) !== 0) {
+            rewind($errors);
+            $details = trim((string) stream_get_contents($errors, 8192));
+            if ($details !== '') {
+                error_log('Ticketportal Git-Update: ' . $details);
+            }
+            rewind($output);
+            $message = trim((string) stream_get_contents($output, 1024));
+            if (!preg_match('/\A[^\r\n]{1,400}\z/u', $message)) {
+                $message = 'Das Update konnte nicht gestartet werden. Prüfen Sie den PHP-CLI-Pfad in private/config.php und das PHP-Fehlerprotokoll.';
+            }
+            throw new RuntimeException($message);
+        }
+    } finally {
+        fclose($errors);
+        fclose($output);
     }
 }

@@ -41,9 +41,15 @@ function portalActiveRelease(): string
     return $path;
 }
 
-function portalEntry(string $file): string
+function portalProgramLock(bool $release = false): void
 {
     static $lock;
+    if ($release) {
+        if (is_resource($lock)) {
+            fclose($lock);
+        }
+        return;
+    }
     if (is_dir(portalPrivatePath('data')) && !is_resource($lock)) {
         $lock = @fopen(portalPrivatePath('data/program.lock'), 'c');
         if (!$lock || !flock($lock, LOCK_SH | LOCK_NB)) {
@@ -56,7 +62,11 @@ function portalEntry(string $file): string
             exit('Das Ticketportal wird gerade aktualisiert. Bitte laden Sie die Seite in Kürze erneut.');
         }
     }
+}
 
+function portalEntry(string $file): string
+{
+    portalProgramLock();
     $entry = realpath(portalActiveRelease() . '/' . $file);
     if ($entry === false) {
         throw new RuntimeException('Die aktive Programmdatei fehlt.');

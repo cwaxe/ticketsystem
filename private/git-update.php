@@ -35,7 +35,7 @@ function runUpdateCommand(array $arguments, ?string $outputFile = null): string
             if ($detail !== '') {
                 fwrite(STDERR, $detail . PHP_EOL);
             }
-            throw new RuntimeException('Der Befehl ' . basename($arguments[0]) . ' ist fehlgeschlagen. Details stehen in der Ausgabe der geplanten Aufgabe.');
+            throw new RuntimeException('Der Befehl ' . basename($arguments[0]) . ' ist fehlgeschlagen. Details stehen im PHP-Fehlerprotokoll oder in der CLI-Ausgabe.');
         }
         if ($outputFile !== null) {
             return '';
@@ -175,22 +175,22 @@ function installGitCandidate(string $mirror, array $candidate, string $active): 
 
 umask(0077);
 $mode = $argv[1] ?? '';
-if (!in_array($mode, ['--check', '--apply', '--pending'], true) || count($argv) !== 2) {
-    fwrite(STDERR, "Aufruf: update.php --check | --apply | --pending\n");
+// An old scheduled task must no longer process queued updates.
+if ($mode === '--pending') {
+    exit;
+}
+if (!in_array($mode, ['--check', '--apply'], true) || count($argv) !== 2) {
+    fwrite(STDERR, "Aufruf: update.php --check | --apply\n");
     exit(1);
 }
 if (!is_file(portalPrivatePath('data/tickets.sqlite3'))) {
-    fwrite(STDERR, "Bitte zuerst die Datenbank des Ticketportals einrichten.\n");
+    echo "Bitte zuerst die Datenbank des Ticketportals einrichten.\n";
     exit(1);
 }
 $lock = fopen(portalPrivatePath('data/update-job.lock'), 'c');
 if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) {
     echo "Eine Git-Update-Aufgabe läuft bereits.\n";
-    exit($mode === '--pending' ? 0 : 1);
-}
-$request = $mode === '--pending' ? readUpdateState('request.json') : [];
-if ($mode === '--pending' && !$request) {
-    exit;
+    exit(1);
 }
 $status = ['checked_at' => time()];
 $exitCode = 0;
@@ -199,7 +199,6 @@ try {
         throw new RuntimeException('Der PHP-CLI-Prozess benötigt proc_open, um Git aufzurufen.');
     }
     putenv('GIT_TERMINAL_PROMPT=0');
-    $install = $mode === '--apply' || ($request['action'] ?? '') === 'install';
     $active = portalActiveRelease();
     $installed = portalVersion($active);
     $mirror = updateStatePath('git');
@@ -207,10 +206,8 @@ try {
     $status += $candidate + ['available' => version_compare($candidate['version'], $installed, '>')];
     if (!$status['available']) {
         $status['message'] = 'Das Ticketportal ist auf dem aktuellen freigegebenen Stand.';
-    } elseif (!$install) {
+    } elseif ($mode === '--check') {
         $status['message'] = 'Version ' . $candidate['version'] . ' ist zur Installation verfügbar.';
-    } elseif ($mode === '--pending' && ($request['commit'] ?? '') !== $candidate['commit']) {
-        $status['message'] = 'Seit der Prüfung wurde eine andere Version freigegeben. Bitte bestätigen Sie die neue Version im Backend.';
     } else {
         installGitCandidate($mirror, $candidate, $active);
         $status['available'] = false;
@@ -221,12 +218,10 @@ try {
 } catch (Throwable $error) {
     $message = $error instanceof RuntimeException ? $error->getMessage() : 'Die neue Version konnte nicht geprüft oder installiert werden.';
     fwrite(STDERR, $error->getMessage() . PHP_EOL);
+    echo $message . PHP_EOL;
     writeUpdateFile('status.json', json_encode(['checked_at' => time(), 'message' => $message], JSON_THROW_ON_ERROR));
     $exitCode = 1;
 } finally {
-    if ($request) {
-        unlink(updateStatePath('request.json'));
-    }
     fclose($lock);
 }
 exit($exitCode);

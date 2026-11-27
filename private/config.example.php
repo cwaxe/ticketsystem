@@ -15,4 +15,6 @@ return [
     'smtp_mode' => 'implicit', // implicit (465) oder starttls (typisch 587)
     'smtp_user' => 'ticket@edv-waxenberger.de',
     'smtp_password' => 'HIER-EINTRAGEN',
+    // Optional, wenn der PHP-CLI-Pfad vom Webprozess aus abweicht.
+    // 'update_php' => '/absoluter/pfad/zu/php',
 ];

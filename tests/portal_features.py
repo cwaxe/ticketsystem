@@ -46,10 +46,19 @@ class PortalFeatures(unittest.TestCase):
             shutil.copytree(ROOT / directory, self.site / directory,
                             ignore=shutil.ignore_patterns('config.php', 'data'))
         self.private = self.site / 'private'
+        self.repo = self.site / 'release-repo'
+        self.git_env = os.environ | {
+            'TMPDIR': str(self.site),
+            'GIT_CONFIG_COUNT': '1',
+            'GIT_CONFIG_KEY_0': f'url.{self.repo.as_uri()}.insteadOf',
+            'GIT_CONFIG_VALUE_0': 'git@github.com:cwaxe/ticketsystem.git',
+        }
+        php_cli = json.dumps(str(Path(shutil.which(PHP)).resolve()))
         (self.private / 'config.php').write_text("""<?php return [
             'base_url' => 'https://tickets.example.com/',
             'admin_email' => 'admin@example.com',
             'mail_email' => 'ticket@example.com', 'secret' => str_repeat('a', 64),
+            'update_php' => """ + php_cli + """,
         ];""")
         self.php('worker.php', '--setup')
         self.db_path = self.private / 'data/tickets.sqlite3'
@@ -87,7 +96,7 @@ class PortalFeatures(unittest.TestCase):
         with log_path.open('w') as log:
             server = subprocess.Popen([PHP, '-d', 'upload_max_filesize=20M',
                 '-d', 'post_max_size=24M', '-d', f'upload_tmp_dir={self.site}', '-S', f'127.0.0.1:{port}', '-t', self.site / 'public'],
-                stdout=log, stderr=log)
+                stdout=log, stderr=log, env=self.git_env)
         self.addCleanup(server.wait, 5)
         self.addCleanup(server.terminate)
         for _ in range(50):
@@ -185,8 +194,8 @@ class PortalFeatures(unittest.TestCase):
     def test_git_updates(self):
         installed = (self.private / 'version.txt').read_text().strip()
         major, minor, patch = (int(part) for part in installed.split('.'))
-        first, second, broken = (f'{major}.{minor}.{patch + step}' for step in (1, 2, 3))
-        repo = self.site / 'release-repo'
+        new_version, broken = (f'{major}.{minor}.{patch + step}' for step in (1, 2))
+        repo = self.repo
         repo.mkdir()
         for directory in ('private', 'public'):
             shutil.copytree(self.site / directory, repo / directory,
@@ -196,17 +205,9 @@ class PortalFeatures(unittest.TestCase):
                      ['config', 'user.email', 'update@example.com'], ['add', '.'],
                      ['commit', '-m', 'Initial release']):
             subprocess.run(git + args, check=True, capture_output=True)
-        env = os.environ | {
-            'GIT_CONFIG_COUNT': '1',
-            'GIT_CONFIG_KEY_0': f'url.{repo.as_uri()}.insteadOf',
-            'GIT_CONFIG_VALUE_0': 'git@github.com:cwaxe/ticketsystem.git',
-        }
-
-        def updater(mode, code=0):
-            result = subprocess.run([PHP, '-d', f'sys_temp_dir={self.site}', self.private / 'update.php', mode],
-                                    cwd=self.private, env=env, capture_output=True, timeout=30)
-            self.assertEqual(result.returncode, code, (result.stdout, result.stderr))
-            return result.stdout.decode()
+        def updater(mode):
+            return subprocess.run([PHP, self.private / 'update.php', mode],
+                cwd=self.private, env=self.git_env, check=True, capture_output=True, timeout=30).stdout.decode()
 
         def release(version, invalid=False):
             (repo / 'private/version.txt').write_text(version + '\n')
@@ -221,47 +222,43 @@ class PortalFeatures(unittest.TestCase):
         self.assertEqual(self.http('?updates=1', self.owner)[0], 403)
         self.assertEqual(self.post('', self.owner, action='check-update')[0], 403)
         self.assertEqual(self.http('?updates=1', self.admin, {'action': 'check-update'})[0], 403)
-        self.assertIn('aktuellen freigegebenen Stand', updater('--check'))
-        self.assertIn('zuerst', self.post('?updates=1', self.admin, action='install-update')[2].decode())
-        release(first)
+        settings = self.page('?updates=1', self.admin)
+        self.assertIn('Auf Updates prüfen', settings)
+        self.assertNotIn('value="install-update"', settings)
+        self.assertFalse((self.private / 'data/updates/git').exists())
         self.assertEqual(self.post('?updates=1', self.admin, action='check-update')[0], 303)
-        self.assertIn('vorgemerkt', self.page('?updates=1', self.admin))
-        self.assertIn(first, updater('--pending'))
-        self.assertIn(f'Version {first} installieren', self.page('?updates=1', self.admin))
-        self.assertEqual(self.post('?updates=1', self.admin, action='install-update')[0], 303)
+        self.assertIn('aktuellen freigegebenen Stand', self.page('?updates=1', self.admin))
 
-        # A newer commit requires another confirmation, even when it is on the allowed branch.
         schema = repo / 'private/schema.sql'
         schema.write_text(schema.read_text().replace('PRAGMA user_version = 9;',
             'CREATE TABLE IF NOT EXISTS update_test(id INTEGER PRIMARY KEY); PRAGMA user_version = 10;'))
         app = repo / 'private/app.php'
         app.write_text(app.read_text().replace('const SCHEMA_VERSION = 9;', 'const SCHEMA_VERSION = 10;'))
-        release(second)
-        self.assertIn('andere Version freigegeben', updater('--pending'))
+        release(new_version)
+        # An existing scheduled task from 1.0.1 must not install a queued or released update.
+        commit = subprocess.check_output(git + ['rev-parse', 'HEAD']).decode().strip()
+        (self.private / 'data/updates/request.json').write_text(json.dumps({'action': 'install', 'commit': commit}))
+        self.assertEqual(updater('--pending'), '')
         self.assertIn(f'Installierte Version {installed}', self.page('?updates=1', self.admin))
-        self.assertIn(f'Version {second} installieren', self.page('?updates=1', self.admin))
-        self.assertEqual(self.post('?updates=1', self.admin, action='install-update')[0], 303)
-        self.assertIn(f'{second} wurde installiert', updater('--pending'))
+        self.assertEqual(self.post('?updates=1', self.admin, action='check-update')[0], 303)
         with self.database() as db:
             self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (9,))
-        self.assertIn(f'Installierte Version {second}', self.page('?updates=1', self.admin))
+        self.assertIn(f'Installierte Version {new_version}', self.page('?updates=1', self.admin))
         with self.database() as db:
             self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (10,))
             self.assertEqual(db.execute('SELECT signature FROM mail_settings').fetchone(), ('Testsignatur',))
         self.assertIn('Drucker', self.page('?id=1', self.owner))
-        self.assertIn(f'Ticketportal: {second}', self.php('worker.php', '--check').decode())
+        self.assertIn(f'Ticketportal: {new_version}', self.php('worker.php', '--check').decode())
         self.assertIn('admin@example.com', self.php('admin-login.php', '--status').decode())
-        self.assertIn(f'Build {second}', self.page('?datei=style.css', self.owner))
+        self.assertIn(f'Build {new_version}', self.page('?datei=style.css', self.owner))
         self.assertEqual(self.http('?datei=../private/config.php')[0], 404)
 
         release(broken, invalid=True)
-        updater('--check')
-        self.assertEqual(self.post('?updates=1', self.admin, action='install-update')[0], 303)
-        updater('--pending', code=1)
-        self.assertIn('fehlgeschlagen', self.page('?updates=1', self.admin))
-        self.assertIn(f'Installierte Version {second}', self.page('?updates=1', self.admin))
+        status, _, page = self.post('?updates=1', self.admin, action='check-update')
+        self.assertEqual(status, 200)
+        self.assertIn('fehlgeschlagen', page.decode())
+        self.assertIn(f'Installierte Version {new_version}', self.page('?updates=1', self.admin))
         self.assertIn('Drucker', self.page('?id=1', self.owner))
-        self.assertFalse((self.private / 'data/updates/request.json').exists())
 
     def test_end_to_end(self):
         self.assertIn('Begründung zum Wiederöffnen', self.page('?id=1', self.owner))

@@ -179,15 +179,18 @@ try {
                 go($config, '?signatur=1&saved=1');
             }
         }
-        if (in_array($action, ['check-update', 'install-update'], true)) {
+        if ($action === 'check-update') {
             if (!$admin || !$updateSettings) {
                 http_response_code(403);
                 exit('Dieser Bereich ist für die Verwaltung vorgesehen.');
             }
+            $db = null;
+            session_write_close();
+            releaseProgramLockForUpdate();
             try {
-                queueGitUpdate($action === 'check-update' ? 'check' : 'install', $installedVersion);
+                applyGitUpdateFromPortal($config);
                 go($config, '?updates=1');
-            } catch (InvalidArgumentException $error) {
+            } catch (RuntimeException $error) {
                 $notice = $error->getMessage();
             }
         }
@@ -358,7 +361,6 @@ try {
     $statusGroups = [];
     if ($updateSettings) {
         $updateStatus = readUpdateState('status.json');
-        $updatePending = readUpdateState('request.json');
     } elseif ($backupSettings) {
         $canBackup = class_exists(ZipArchive::class);
     } elseif ($signatureSettings) {
@@ -569,31 +571,23 @@ try {
       <ul class="panel detail">
         <li><a href="?signatur=1">E-Mail-Signatur</a><p class="meta">Signatur für automatische E-Mails bearbeiten.</p></li>
         <li><a href="?sicherung=1">Datensicherung</a><p class="meta">ZIP-Sicherung herunterladen oder wiederherstellen.</p></li>
-        <li><a href="?updates=1">Updates</a><p class="meta">Version <?= h($installedVersion) ?> · Nach Updates suchen und freigegebene Versionen installieren.</p></li>
+        <li><a href="?updates=1">Updates</a><p class="meta">Version <?= h($installedVersion) ?> · Freigegebene Updates prüfen und installieren.</p></li>
       </ul>
     </nav>
   <?php elseif ($updateSettings): ?>
     <a class="back" href="?system=1">← Zu den Systemeinstellungen</a>
     <section class="panel detail editor">
       <h2>Installierte Version <?= h($installedVersion) ?></h2>
-      <?php if ($updatePending): ?>
-        <p role="status"><?= ($updatePending['action'] ?? '') === 'install' ? 'Installation' : 'Prüfung' ?> ist vorgemerkt. Die geplante Aufgabe verarbeitet die Anfrage.</p>
-      <?php elseif (!empty($updateStatus['message'])): ?>
+      <?php if ($notice === '' && !empty($updateStatus['message'])): ?>
         <p role="status"><?= h($updateStatus['message']) ?></p>
       <?php endif ?>
       <?php if (!empty($updateStatus['checked_at'])): ?>
         <p class="meta">Letzte Prüfung am <?= h(date('d.m.Y \u\m H:i', $updateStatus['checked_at'])) ?> Uhr</p>
-      <?php else: ?>
-        <p class="meta">Für Updates im Backend die geplante PHP-Aufgabe <code>private/update.php --pending</code> und den GitHub-SSH-Zugang einrichten.</p>
       <?php endif ?>
-      <?php if (!$updatePending): ?>
-        <form method="post" action="?updates=1">
-          <?= csrfInput() ?><button name="action" value="check-update">Auf Updates prüfen</button>
-          <?php if (!empty($updateStatus['available']) && version_compare($updateStatus['version'], $installedVersion, '>')): ?>
-            <button name="action" value="install-update">Version <?= h($updateStatus['version']) ?> installieren</button>
-          <?php endif ?>
-        </form>
-      <?php endif ?>
+      <p class="meta">Beim Klick wird der GitHub-Stand geprüft und eine neuere freigegebene Version direkt installiert.</p>
+      <form method="post" action="?updates=1">
+        <?= csrfInput() ?><button name="action" value="check-update">Auf Updates prüfen</button>
+      </form>
     </section>
   <?php elseif ($backupSettings): ?>
     <a class="back" href="?system=1">← Zu den Systemeinstellungen</a>

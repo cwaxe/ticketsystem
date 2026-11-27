@@ -195,6 +195,12 @@ Die Verwaltung bündelt E-Mail-Signatur, Datensicherung und Updates unter **Syst
 
 Paket: `Waxenberger-Ticketportal-Vollpaket-v1.0.1.zip`.
 
+## 23. Version 1.0.2 mit manuellem GitHub-Update
+
+Ein Klick auf **Auf Updates prüfen** liest den freigegebenen GitHub-Stand und installiert eine neuere Version direkt. Eine vorhandene geplante Aufgabe mit `--pending` führt ab dieser Version keine Updates aus. Die Ergebnisse erscheinen im Backend.
+
+Paket: `Waxenberger-Ticketportal-Vollpaket-v1.0.2.zip`.
+
 ## Installation und Betrieb
 
 - [README.md](README.md) beschreibt Voraussetzungen, Neuinstallation, Update und Bedienung.
