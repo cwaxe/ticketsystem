@@ -141,7 +141,13 @@ Die HTML-Statusmail kennzeichnet Offen blau, In Arbeit violett, Wartet bernstein
 
 Die Portal- und SMTP-Tests prüften die Reihenfolge, die Kombination von Status und Kommentar sowie die Farben und das eingebettete Logo.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Statusfarben.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Statusfarben.zip`.
+
+## 16. Mailbegrüßung
+
+Nach „Guten Tag,“ beginnen die automatischen Mailtexte in HTML und Text mit einem Kleinbuchstaben.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Mailbegrussung.zip`.
 
 ## Installation und Betrieb
 

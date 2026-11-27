@@ -248,13 +248,13 @@ function outboxMessage(PDO $db, array $config, array $row): array
                 $comment = $comment !== '' ? $comment : 'Die E-Mail enthält keinen übernommenen Antworttext.';
             }
             $subject = 'Kommentar zu Ticket ' . $code;
-            $intro = ($admin ? 'Zu Ticket ' . $code . ' ist ein neuer Kundenkommentar eingegangen.'
-                : 'Zu Ihrem Ticket ' . $code . ' gibt es einen neuen Kommentar vom IT-Service:') . "\n\n" . $comment;
+            $intro = ($admin ? 'zu Ticket ' . $code . ' ist ein neuer Kundenkommentar eingegangen.'
+                : 'zu Ihrem Ticket ' . $code . ' gibt es einen neuen Kommentar vom IT-Service:') . "\n\n" . $comment;
         } else {
             $subject = 'Statusänderung zu Ticket ' . $code;
             $change = 'von „' . $row['old_status'] . '“ auf „' . $newStatus . '“';
-            $intro = $admin ? 'Der Kunde hat Ticket ' . $code . ' geschlossen. Der Status wechselte ' . $change . '.'
-                : 'Der Status Ihres Tickets ' . $code . ' wurde ' . $change . ' geändert.';
+            $intro = $admin ? 'der Kunde hat Ticket ' . $code . ' geschlossen. Der Status wechselte ' . $change . '.'
+                : 'der Status Ihres Tickets ' . $code . ' wurde ' . $change . ' geändert.';
             if ($comment !== null) {
                 $intro .= "\n\nKommentar zur Statusänderung:\n" . $comment;
             }
@@ -272,7 +272,7 @@ function outboxMessage(PDO $db, array $config, array $row): array
         $attachments = $row['attachment_notice'] ? "\n\nAnhänge liegen in der Original-E-Mail im Ticketpostfach." : '';
         return [
             'Neues Ticket ' . $code,
-            "Guten Tag,\n\nIm Ticketportal wurde das Ticket " . $code . " erfasst.\n\n"
+            "Guten Tag,\n\nim Ticketportal wurde das Ticket " . $code . " erfasst.\n\n"
                 . 'Absender: ' . $row['ticket_sender'] . "\nBetreff: " . $row['ticket_subject'] . "\n\n"
                 . $text . $attachments . "\n\nZum Ticket:\n" . $config['base_url'] . '?id=' . $ticket . '&admin=1',
         ];
@@ -290,11 +290,11 @@ function outboxMessage(PDO $db, array $config, array $row): array
 
     // A fragment stays out of normal HTTP request URLs and access logs.
     $url = $config['base_url'] . '?link=1#' . $token;
-    $intro = "Sie haben einen Anmeldelink für das Ticketportal angefordert.";
+    $intro = "für das Ticketportal haben Sie einen Anmeldelink angefordert.";
     $subject = 'Ihr Anmeldelink zum Ticketportal';
     if ($row['ticket_id'] !== null) {
         $code = ticketCode((int) $row['ticket_id']);
-        $intro = "Vielen Dank für Ihre Nachricht. Wir haben Ihr Anliegen als Ticket " . $code . " erfasst.\n"
+        $intro = "vielen Dank für Ihre Nachricht. Wir haben Ihr Anliegen als Ticket " . $code . " erfasst.\n"
             . "Sie können direkt auf diese E-Mail antworten. Ihre Antwort wird dem Ticket zugeordnet.";
         $subject = 'Eingangsbestätigung ' . $code;
     }
