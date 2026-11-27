@@ -1,0 +1,11 @@
+/private/config.php
+/private/data/
+/private/vendor/
+.env
+.env.*
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal

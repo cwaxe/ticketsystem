@@ -1,0 +1,103 @@
+:root {
+    color-scheme: light;
+    --blue: #0d3082;
+    --pale: #e8efff;
+    --line: #d3def3;
+    --text: #294475;
+    --white: #fff;
+    font: 16px/1.55 Arial, Helvetica, "Liberation Sans", sans-serif;
+    color: var(--blue);
+}
+* { box-sizing: border-box }
+body { margin: 0; min-height: 100vh; display: flex; flex-direction: column; background: #f7f9fd }
+a { color: var(--blue) }
+a:hover { text-decoration-thickness: 2px }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, textarea:focus-visible {
+    outline: 2px solid #1683b3; outline-offset: 3px;
+}
+.site-header { background: white; border-top: 4px solid var(--blue); border-bottom: 1px solid var(--line) }
+.header-content, .footer-content { width: min(100% - 32px, 970px); margin-inline: auto }
+.header-content { display: flex; align-items: center; min-height: 77px }
+.logo { display: inline-flex; gap: 18px; align-items: center; color: var(--blue); text-decoration: none; font-size: 15px; font-weight: bold }
+.logo img { width: clamp(112px, 23vw, 156px); height: auto }
+.logo span { border-left: 1px solid var(--line); padding-left: 18px }
+main { width: min(100% - 32px, 970px); margin: clamp(30px, 7vw, 75px) auto 50px }
+.portal-intro { margin-bottom: 27px }
+.portal-intro h1 { font-size: clamp(30px, 5vw, 43px); letter-spacing: -.025em }
+.portal-intro p { color: var(--text) }
+.portal-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px }
+.portal-card { padding: clamp(20px, 4vw, 32px) }
+.portal-card h2 { font-size: 23px }
+.portal-card p { color: var(--text); max-width: 42ch }
+.portal-card .button { margin-top: 8px }
+.portal-card form { margin-top: 18px }
+.portal-card button { margin-top: 12px }
+.panel.new-request { background: var(--pale) }
+.mail-address { margin: 12px 0 0; font-size: 14px; overflow-wrap: anywhere }
+h1, h2, p { margin: 0 0 12px }
+h1 { font-size: clamp(24px, 4vw, 32px); line-height: 1.2 }
+h2 { font-size: 19px; line-height: 1.3; overflow-wrap: anywhere }
+.panel { background: var(--white); border: 1px solid var(--line); border-radius: 12px }
+.signin { margin: 0 auto; max-width: 620px; padding: clamp(21px, 5vw, 42px); background: var(--pale) }
+.signin h2 { margin-top: 23px }
+.signin form { margin-top: 20px }
+.signin p, .meta, .empty, small { color: var(--text) }
+label { display: grid; gap: 4px; font-size: 14px; font-weight: bold; min-width: 0 }
+input, select, textarea { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid #aebfe0; background: white; border-radius: 4px; font: inherit; color: var(--blue); font-weight: normal }
+textarea { resize: vertical }
+button, .button { width: fit-content; display: inline-block; padding: 8px 14px; border: 1px solid var(--blue); background: var(--blue); color: white; border-radius: 4px; font: inherit; text-decoration: none; cursor: pointer }
+button:hover, .button:hover { background: #193e92 }
+.signin button { margin-top: 12px }
+.secondary { background: white; color: var(--blue) }
+.secondary:hover { background: var(--pale) }
+.notice { padding: 13px 15px; margin-bottom: 18px; border-left: 3px solid #1683b3; background: var(--pale); overflow-wrap: anywhere }
+.page-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px }
+.page-title h1 { margin: 0 }
+.page-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px }
+.back { display: inline-block; margin-bottom: 14px }
+.listing { overflow: hidden }
+.filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 15px; background: var(--pale) }
+.filters label:first-child { flex: 1 1 230px }
+.filters label:nth-child(2) { flex: 0 1 155px }
+.filters .button { margin-left: auto }
+.table-wrap { overflow-x: auto }
+table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px }
+th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle }
+th { background: #f5f8ff; white-space: nowrap }
+td:first-child { min-width: 180px; width: 50%; overflow-wrap: anywhere }
+tbody tr:last-child td { border-bottom: 0 }
+tbody tr:hover { background: #f8faff }
+td small { display: block; margin-top: 2px }
+.badge { display: inline-block; background: var(--pale); border: 1px solid var(--line); border-radius: 12px; padding: 2px 8px; white-space: nowrap; font-size: 12px; font-weight: bold }
+.overdue { color: #a12636; font-weight: bold }
+.empty, .pagination { padding: 20px 15px; margin: 0 }
+.pagination { display: flex; gap: 16px }
+.detail { padding: clamp(15px, 4vw, 25px) }
+.meta { font-size: 14px }
+.meta .badge { margin-right: 7px }
+.message { background: #f5f8ff; border: 1px solid var(--line); border-radius: 4px; padding: 14px; margin: 16px 0; white-space: pre-wrap; overflow-wrap: anywhere }
+.comments { margin-top: 18px }
+.ticket-comment .meta { margin-bottom: 4px }
+.ticket-comment .message { margin: 0 0 14px }
+.report-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 16px 0 }
+.report-stats div { padding: 12px; background: var(--pale); border-radius: 4px }
+.report-stats dt { font-size: 14px }
+.report-stats dd { margin: 4px 0 0; font-size: 20px; font-weight: bold }
+.editor { display: grid; gap: 13px; margin-top: 19px }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px }
+.delete { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 12px }
+.delete summary { cursor: pointer }
+.delete form { padding-top: 10px }
+.danger { background: #9c2c39; border-color: #9c2c39 }
+.danger:hover { background: #7d242e }
+.site-footer { margin-top: auto; padding: 18px 0; font-size: 13px; border-top: 1px solid var(--line); color: var(--text); background: white }
+.footer-content { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 18px }
+.footer-content nav { display: flex; flex-wrap: wrap; gap: 6px 16px }
+@media (max-width: 650px) {
+    .portal-options { grid-template-columns: 1fr }
+}
+@media (max-width: 520px) {
+    .header-content { min-height: 65px }
+    main { margin-top: 27px }
+    .filters .button { margin-left: 0 }
+}

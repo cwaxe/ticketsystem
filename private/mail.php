@@ -1,0 +1,200 @@
+<?php
+declare(strict_types=1);
+
+use ZBateson\MailMimeParser\Header\AddressHeader;
+use ZBateson\MailMimeParser\Message;
+
+function smtpMessageId(array $config, int|string $id): string
+{
+    $domain = substr(strrchr($config['mail_email'], '@'), 1);
+    $digest = substr(hash_hmac('sha256', 'mail:' . $id, $config['secret']), 0, 40);
+    return '<' . $digest . '@' . $domain . '>';
+}
+
+function smtpSend(array $config, string $address, string $subject, string $body, int|string $id): void
+{
+    $host = $config['smtp_host'];
+    $mode = $config['smtp_mode'];
+    $port = (int) $config['smtp_port'];
+    if (!preg_match('/\A[a-z0-9.-]+\z/i', $host) || $port < 1 || $port > 65535 ||
+        !in_array($mode, ['implicit', 'starttls'], true)) {
+        throw new RuntimeException('Ungültige SMTP-Konfiguration.');
+    }
+    if (($config['smtp_user'] ?? '') === '' || ($config['smtp_password'] ?? '') === '') {
+        throw new RuntimeException('SMTP-Benutzername oder Passwort fehlt in der Konfiguration.');
+    }
+    $scheme = $mode === 'implicit' ? 'smtps' : 'smtp';
+    $sender = $config['mail_email'];
+    if (preg_match('/[^\x20-\x7e]/', $subject)) {
+        $subject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+    }
+    $body = preg_replace("/\r\n|\r|\n/", "\r\n", $body);
+    $message = implode("\r\n", [
+        'Date: ' . gmdate('D, d M Y H:i:s') . ' +0000',
+        'From: IT-Service Waxenberger <' . $sender . '>',
+        'To: <' . $address . '>',
+        'Subject: ' . $subject,
+        'Message-ID: ' . smtpMessageId($config, $id),
+        'Auto-Submitted: auto-generated',
+        'X-Auto-Response-Suppress: All',
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: quoted-printable',
+        '',
+        quoted_printable_encode($body),
+        '',
+    ]);
+    $stream = fopen('php://temp', 'w+b');
+    if ($stream === false) {
+        throw new RuntimeException('Ausgehende Nachricht konnte nicht vorbereitet werden.');
+    }
+    try {
+        fwrite($stream, $message);
+        rewind($stream);
+        $curl = curl_init($scheme . '://' . $host . ':' . $port);
+        curl_setopt_array($curl, [
+            CURLOPT_USERNAME => $config['smtp_user'],
+            CURLOPT_PASSWORD => $config['smtp_password'],
+            CURLOPT_USE_SSL => CURLUSESSL_ALL,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_MAIL_FROM => '<' . $sender . '>',
+            CURLOPT_MAIL_RCPT => ['<' . $address . '>'],
+            CURLOPT_UPLOAD => true,
+            CURLOPT_INFILE => $stream,
+            CURLOPT_INFILESIZE => strlen($message),
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 20,
+            CURLOPT_RETURNTRANSFER => true,
+        ]);
+        if (curl_exec($curl) === false) {
+            $code = curl_errno($curl);
+            $reply = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+            $cause = match ($code) {
+                6 => 'Servername konnte nicht aufgelöst werden.',
+                7 => 'Server oder Port ist nicht erreichbar.',
+                28 => 'Zeitüberschreitung beim Verbindungsaufbau oder Versand.',
+                35, 51, 60 => 'TLS-Verbindung oder Zertifikat konnte nicht geprüft werden.',
+                67 => 'Anmeldung abgelehnt. SMTP-Benutzername und Postfachpasswort prüfen.',
+                default => 'Verbindung oder Nachrichtenannahme fehlgeschlagen.',
+            };
+            $codes = 'cURL ' . $code . ($reply >= 400 ? ', SMTP ' . $reply : '');
+            throw new RuntimeException('SMTP-Test oder Versand fehlgeschlagen (' . $codes . '). ' . $cause);
+        }
+    } finally {
+        fclose($stream);
+    }
+}
+
+function deliverOutbox(PDO $db, array $config, ?callable $send = null): array
+{
+    $send ??= 'smtpSend';
+    $now = time();
+    query($db, 'DELETE FROM links WHERE expires_at <= ?', [$now]);
+    query($db, 'DELETE FROM rate_limits WHERE expires_at <= ?', [$now]);
+    query($db, 'DELETE FROM outbox WHERE ticket_id IS NULL AND created_at <= ?', [$now - LINK_SECONDS]);
+    $rows = query($db, 'SELECT * FROM outbox WHERE next_attempt <= ? ORDER BY next_attempt, id LIMIT 15', [$now])->fetchAll();
+    $failures = 0;
+    $sent = 0;
+    foreach ($rows as $row) {
+        $id = (int) $row['id'];
+        if ($row['role'] === 'admin' && $row['email'] !== $config['admin_email']) {
+            query($db, 'DELETE FROM outbox WHERE id = ?', [$id]);
+            continue;
+        }
+        [$subject, $body] = outboxMessage($db, $config, $row);
+        try {
+            $send($config, $row['email'], $subject, $body, $id);
+            query($db, 'DELETE FROM outbox WHERE id = ?', [$id]);
+            $sent++;
+        } catch (RuntimeException $error) {
+            $failures++;
+            $delay = min(3600, 60 * (2 ** min(6, (int) $row['attempts'])));
+            query($db, 'UPDATE outbox SET attempts = attempts + 1, next_attempt = ? WHERE id = ?', [time() + $delay, $id]);
+            fwrite(STDERR, 'Versandauftrag ' . $id . ': ' . $error->getMessage() . PHP_EOL);
+        }
+    }
+    return ['sent' => $sent, 'failures' => $failures];
+}
+
+function outboxMessage(PDO $db, array $config, array $row): array
+{
+    if ($row['role'] === 'admin' && $row['ticket_id'] !== null) {
+        $code = ticketCode((int) $row['ticket_id']);
+        return [
+            'Neues Ticket ' . $code,
+            "Guten Tag,\n\nIm Ticketportal wurde das Ticket " . $code . " erfasst.\n\n"
+                . "Zur Ticketverwaltung:\n" . $config['base_url'] . "?admin=1\n\nIT-Service Waxenberger",
+        ];
+    }
+
+    $id = (int) $row['id'];
+    $expires = (int) $row['link_expires'];
+    if ($expires <= time() + 300) {
+        $expires = time() + LINK_SECONDS;
+        query($db, 'UPDATE outbox SET link_expires = ? WHERE id = ?', [$expires, $id]);
+    }
+    $token = hash_hmac('sha256', 'login:' . $id . ':' . $expires . ':' . $row['role'] . ':' . $row['email'], $config['secret']);
+    query($db, 'INSERT OR IGNORE INTO links (digest, email, role, expires_at) VALUES (?, ?, ?, ?)',
+        [hash('sha256', $token), $row['email'], $row['role'], $expires]);
+
+    // A fragment stays out of normal HTTP request URLs and access logs.
+    $url = $config['base_url'] . '?link=1#' . $token;
+    $intro = "Sie haben einen Anmeldelink für das Ticketportal angefordert.";
+    $subject = 'Ihr Anmeldelink zum Ticketportal';
+    if ($row['ticket_id'] !== null) {
+        $code = ticketCode((int) $row['ticket_id']);
+        $intro = "Vielen Dank für Ihre Nachricht. Wir haben Ihr Anliegen als Ticket " . $code . " erfasst.";
+        $subject = 'Eingangsbestätigung ' . $code;
+    }
+    $body = "Guten Tag,\n\n" . $intro . "\n\nÜber diesen persönlichen Link gelangen Sie zu Ihrem Ticketportal:\n\n"
+        . $url . "\n\nDer Link ist einmal verwendbar und läuft nach spätestens 24 Stunden ab. "
+        . "Auf der Startseite des Portals können Sie jederzeit einen neuen Link anfordern.\n\nIT-Service Waxenberger";
+    return [$subject, $body];
+}
+
+function parseTicketMail(string $raw, bool $limited, array $config): ?array
+{
+    if ($limited) {
+        $raw = preg_split('/\r?\n\r?\n/', $raw, 2)[0] . "\r\n\r\n";
+    }
+    $message = Message::from($raw, true);
+    $auto = trim($message->getHeaderValue('Auto-Submitted') ?? '');
+    $precedence = trim($message->getHeaderValue('Precedence') ?? '');
+    if (($auto !== '' && !preg_match('/\Ano(?:\s*;|\z)/i', $auto)) ||
+        $message->getHeader('List-Id') !== null ||
+        preg_match('/\A(?:bulk|list|junk)\b/i', $precedence) ||
+        preg_match('/^Return-Path:[ \t]*<>/im', preg_split('/\r?\n\r?\n/', $raw, 2)[0]) ||
+        strtolower($message->getContentType()) === 'multipart/report') {
+        return null;
+    }
+    $from = $message->getHeaderAs('From', AddressHeader::class);
+    if (!$from || count($from->getAddresses()) !== 1 || $message->getHeader('From', 1) !== null) {
+        return null;
+    }
+    $sender = emailAddress($from->getEmail() ?? '');
+    if ($sender === null || strcasecmp($sender, $config['mail_email']) === 0) {
+        return null;
+    }
+
+    $body = $limited ? '' : trim($message->getTextContent() ?? '');
+    if (!$limited && $body === '') {
+        $html = preg_replace('~<(script|style)\b[^>]*>.*?</\1\s*>~is', '', $message->getHtmlContent() ?? '');
+        $html = preg_replace('~<br\s*/?>|</(?:p|div|li|h[1-6])\s*>~i', "\n", $html);
+        $body = trim(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+    }
+    $body = str_replace("\0", '', mb_scrub($body, 'UTF-8'));
+    if ($limited || mb_strlen($body) > MAX_TICKET_LENGTH) {
+        $body = trim(mb_substr($body, 0, MAX_TICKET_LENGTH) .
+            "\n\n[Der Nachrichtentext ist gekürzt. Das Original liegt im Postfach.]");
+    }
+    $subject = trim(preg_replace('/\s+/u', ' ', mb_scrub($message->getSubject() ?? '', 'UTF-8')));
+    $messageId = trim($message->getMessageId() ?? '', " \t\r\n<>");
+    return [
+        'email' => $sender,
+        'subject' => $subject !== '' ? mb_substr($subject, 0, 180) : '(Ohne Betreff)',
+        'body' => $body,
+        'attachments' => (int) (!$limited && $message->getAttachmentCount() > 0),
+        'message_id' => $messageId !== '' ? '<' . $messageId . '>' : '',
+    ];
+}
