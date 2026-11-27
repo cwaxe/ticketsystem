@@ -359,7 +359,7 @@ try {
   <link rel="icon" type="image/png" sizes="150x150" href="favicon-150.png">
   <link rel="icon" type="image/png" sizes="300x300" href="favicon-300.png">
   <link rel="apple-touch-icon" href="favicon-300.png">
-  <link rel="stylesheet" href="style.css?v=10">
+  <link rel="stylesheet" href="style.css?v=11">
   <?php if ($showLink): ?><script src="signin.js" defer></script><?php endif ?>
 </head>
 <body>
@@ -662,8 +662,14 @@ try {
           <table>
             <thead><tr><th scope="col">Ticket</th><?php if ($admin): ?><th scope="col">Priorität</th><th scope="col">Fällig am</th><?php endif ?><th scope="col">Eingang</th></tr></thead>
             <?php foreach ($statusGroups as $status => $tickets): ?>
+            <?php $statusClass = match ($status) {
+                'In Arbeit' => ' status-group-in-progress',
+                'Wartet' => ' status-group-waiting',
+                'Erledigt' => ' status-group-closed',
+                default => '',
+            }; ?>
             <tbody>
-              <tr class="ticket-status-group"><th scope="rowgroup" colspan="<?= $admin ? 4 : 2 ?>"><?= h($status) ?></th></tr>
+              <tr class="ticket-status-group<?= $statusClass ?>"><th scope="rowgroup" colspan="<?= $admin ? 4 : 2 ?>"><?= h($status) ?></th></tr>
             <?php foreach ($tickets as $row): ?>
               <tr>
                 <td><a href="?<?= h(http_build_query(['id' => $row['id']] + $groupContext)) ?>"><?= h($row['subject']) ?></a>

@@ -147,7 +147,13 @@ Paket: `Waxenberger-Ticketportal-Vollpaket-Statusfarben.zip`.
 
 Nach „Guten Tag,“ beginnen die automatischen Mailtexte in HTML und Text mit einem Kleinbuchstaben.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Mailbegrussung.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Mailbegrussung.zip`.
+
+## 17. Farbige Statusbereiche
+
+Die Gruppenüberschriften in der Ticketübersicht übernehmen die Farben der Statusmails: Offen blau, In Arbeit violett, Wartet bernsteinfarben und Erledigt grün.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Statusbereiche.zip`.
 
 ## Installation und Betrieb
 

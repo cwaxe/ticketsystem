@@ -57,7 +57,14 @@ button:hover, .button:hover { background: #193e92 }
 .back { display: inline-block; margin-bottom: 14px }
 .listing { overflow: hidden }
 .list-views { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px }
-.ticket-status-group th { background: var(--pale); color: var(--blue) }
+.ticket-status-group th {
+    background: var(--status-background, #e8efff);
+    color: var(--status-text, #183a76);
+    box-shadow: inset 4px 0 var(--status-accent, #2756a8);
+}
+.status-group-in-progress { --status-background: #f0eafa; --status-text: #462c73; --status-accent: #6847a5 }
+.status-group-waiting { --status-background: #fff2d6; --status-text: #744500; --status-accent: #a06609 }
+.status-group-closed { --status-background: #e0f3e7; --status-text: #145535; --status-accent: #288250 }
 .badge.ticket-new { margin-left: 6px; padding: 2px 9px; background: var(--blue); border-color: var(--blue); color: var(--white); vertical-align: middle }
 .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 15px; background: var(--pale) }
 .filters label:first-child { flex: 1 1 230px }
