@@ -55,6 +55,7 @@ jobs:
           cp -R private public README.md NETCUP.md netcup/
           test ! -f netcup/private/config.php
           test ! -d netcup/private/data
+          printf '%s\n' 'Vollständiges Update für eine vorhandene netcup-Installation.' 'ZIP im Verzeichnis entpacken, in dem public und private liegen. Installation und Update sind in README.md und NETCUP.md beschrieben.' > netcup/UPDATE.txt
       - name: Vollpaket bereitstellen
         uses: actions/upload-artifact@v4
         with:
