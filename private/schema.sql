@@ -97,5 +97,20 @@ CREATE TABLE IF NOT EXISTS ticket_mail_references (
 );
 CREATE INDEX IF NOT EXISTS ticket_mail_references_ticket ON ticket_mail_references(ticket_id);
 
-PRAGMA user_version = 3;
+CREATE TABLE IF NOT EXISTS status_notifications (
+    outbox_id INTEGER PRIMARY KEY REFERENCES outbox(id) ON DELETE CASCADE,
+    old_status TEXT NOT NULL,
+    new_status TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS ticket_status_notification
+AFTER UPDATE OF status ON tickets
+WHEN OLD.status <> NEW.status
+BEGIN
+    INSERT INTO outbox (email, role, ticket_id, created_at, next_attempt)
+    VALUES (NEW.email, 'customer', NEW.id, CAST(strftime('%s', 'now') AS INTEGER), CAST(strftime('%s', 'now') AS INTEGER));
+    INSERT INTO status_notifications (outbox_id, old_status, new_status)
+    VALUES (last_insert_rowid(), OLD.status, NEW.status);
+END;
+
+PRAGMA user_version = 4;
 COMMIT;

@@ -92,18 +92,21 @@ function printMailStatus(PDO $db): void
         (SELECT COUNT(*) FROM mailbox) AS initialized,
         (SELECT COUNT(*) FROM imported_mail) AS imported,
         COUNT(*) AS queued,
-        COUNT(CASE WHEN role = \'customer\' AND ticket_id IS NOT NULL AND n.outbox_id IS NULL THEN 1 END) AS confirmations,
+        COUNT(CASE WHEN role = \'customer\' AND ticket_id IS NOT NULL AND n.outbox_id IS NULL AND s.outbox_id IS NULL THEN 1 END) AS confirmations,
         COUNT(n.outbox_id) AS comment_notifications,
+        COUNT(s.outbox_id) AS status_notifications,
         COUNT(CASE WHEN role = \'admin\' AND ticket_id IS NOT NULL THEN 1 END) AS admin_alerts,
         COUNT(CASE WHEN role = \'admin\' AND ticket_id IS NULL THEN 1 END) AS admin_links,
         COUNT(CASE WHEN attempts > 0 THEN 1 END) AS retries,
         COUNT(CASE WHEN next_attempt <= ? THEN 1 END) AS ready
-        FROM outbox o LEFT JOIN comment_notifications n ON n.outbox_id = o.id', [time()])->fetch();
+        FROM outbox o LEFT JOIN comment_notifications n ON n.outbox_id = o.id
+        LEFT JOIN status_notifications s ON s.outbox_id = o.id', [time()])->fetch();
     echo 'Postfach initialisiert: ' . ($stats['initialized'] ? 'ja' : 'nein') . PHP_EOL;
     echo 'Importierte E-Mails: ' . $stats['imported'] . PHP_EOL;
     echo 'E-Mails in der Warteschlange: ' . $stats['queued'] . ' (davon Eingangsbestätigungen: ' . $stats['confirmations'] . ')' . PHP_EOL;
     echo 'Davon Adminbenachrichtigungen: ' . $stats['admin_alerts'] . PHP_EOL;
     echo 'Davon Kundenbenachrichtigungen zu Kommentaren: ' . $stats['comment_notifications'] . PHP_EOL;
+    echo 'Davon Kundenbenachrichtigungen zu Statusänderungen: ' . $stats['status_notifications'] . PHP_EOL;
     echo 'Davon Admin-Anmeldelinks: ' . $stats['admin_links'] . PHP_EOL;
     echo 'Davon jetzt versandbereit: ' . $stats['ready'] . PHP_EOL;
     echo 'Davon mit vorherigem Versandfehler: ' . $stats['retries'] . PHP_EOL;

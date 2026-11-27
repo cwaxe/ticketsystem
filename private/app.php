@@ -7,7 +7,7 @@ const LINK_SECONDS = 86400;
 const MAX_TICKET_LENGTH = 24000;
 const MAX_COMMENT_LENGTH = 4000;
 const MAX_CUSTOMER_NAME_LENGTH = 120;
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 function emailAddress(string $address): ?string
 {

@@ -57,7 +57,15 @@ Die Zuordnung gilt auch für Eingangsbestätigungen, die ab diesem Update versch
 
 Lokal geprüft wurden Datenbankmigration, Versand über SMTP, Import über IMAP, Zuordnung und Deduplizierung, automatische Antworten, Absendertrennung sowie Antworten auf erledigte Tickets.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Mailantworten.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Mailantworten.zip`.
+
+## 7. E-Mail bei Statusänderungen
+
+Bei einem tatsächlichen Wechsel erhält der Kunde eine E-Mail mit Ticketnummer, bisherigem und neuem Status sowie Portal-Link. Ein reines Speichern ohne Statuswechsel und die erste Statusvergabe beim Erstellen eines Tickets lösen keine Statusmail aus. Der Versand erfasst auch das Schließen durch den Kunden und das Wiederöffnen durch die Verwaltung.
+
+Die Statusmail verwendet dieselbe Warteschlange und Nachrichtenreferenz wie Kommentarbenachrichtigungen. Antworten von der ursprünglichen Absenderadresse landen als Kommentar im selben Ticket. Der lokale Test deckte die Migration, die Statuswechsel in beiden Portalrollen, den SMTP-Versand und den Rückimport über IMAP ab.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Statusmeldungen.zip`.
 
 ## Installation und Betrieb
 

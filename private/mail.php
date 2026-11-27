@@ -94,8 +94,9 @@ function deliverOutbox(PDO $db, array $config, ?callable $send = null): array
     query($db, 'DELETE FROM links WHERE expires_at <= ?', [$now]);
     query($db, 'DELETE FROM rate_limits WHERE expires_at <= ?', [$now]);
     query($db, 'DELETE FROM outbox WHERE ticket_id IS NULL AND created_at <= ?', [$now - LINK_SECONDS]);
-    $rows = query($db, 'SELECT o.*, c.body AS comment_body FROM outbox o
+    $rows = query($db, 'SELECT o.*, c.body AS comment_body, s.old_status, s.new_status FROM outbox o
         LEFT JOIN comment_notifications n ON n.outbox_id = o.id LEFT JOIN ticket_comments c ON c.id = n.comment_id
+        LEFT JOIN status_notifications s ON s.outbox_id = o.id
         WHERE o.next_attempt <= ? ORDER BY o.next_attempt, o.id LIMIT 15', [$now])->fetchAll();
     $failures = 0;
     $sent = 0;
@@ -130,13 +131,21 @@ function deliverOutbox(PDO $db, array $config, ?callable $send = null): array
 
 function outboxMessage(PDO $db, array $config, array $row): array
 {
-    if (($row['comment_body'] ?? null) !== null) {
+    $comment = $row['comment_body'] ?? null;
+    $newStatus = $row['new_status'] ?? null;
+    if ($comment !== null || $newStatus !== null) {
         $ticket = (int) $row['ticket_id'];
         $code = ticketCode($ticket);
+        if ($comment !== null) {
+            $subject = 'Kommentar zu Ticket ' . $code;
+            $intro = "Zu Ihrem Ticket " . $code . " gibt es einen neuen Kommentar vom IT-Service:\n\n" . $comment;
+        } else {
+            $subject = 'Statusänderung zu Ticket ' . $code;
+            $intro = 'Der Status Ihres Tickets ' . $code . ' wurde von „' . $row['old_status'] . '“ auf „' . $newStatus . '“ geändert.';
+        }
         return [
-            'Kommentar zu Ticket ' . $code,
-            "Guten Tag,\n\nzu Ihrem Ticket " . $code . " gibt es einen neuen Kommentar vom IT-Service:\n\n"
-                . $row['comment_body'] . "\n\nSie können direkt auf diese E-Mail antworten. Ihre Antwort wird dem Ticket zugeordnet.\n\n"
+            $subject,
+            "Guten Tag,\n\n" . $intro . "\n\nSie können direkt auf diese E-Mail antworten. Ihre Antwort wird dem Ticket zugeordnet.\n\n"
                 . "Zum Ticketportal:\n" . $config['base_url'] . '?id=' . $ticket . "\n\nIT-Service Waxenberger",
         ];
     }
