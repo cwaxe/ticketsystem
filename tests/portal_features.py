@@ -51,7 +51,7 @@ class PortalFeatures(unittest.TestCase):
             'TMPDIR': str(self.site),
             'GIT_CONFIG_COUNT': '1',
             'GIT_CONFIG_KEY_0': f'url.{self.repo.as_uri()}.insteadOf',
-            'GIT_CONFIG_VALUE_0': 'git@github.com:cwaxe/ticketsystem.git',
+            'GIT_CONFIG_VALUE_0': 'https://github.com/cwaxe/ticketsystem.git',
         }
         php_cli = json.dumps(str(Path(shutil.which(PHP)).resolve()))
         (self.private / 'config.php').write_text("""<?php return [
@@ -300,13 +300,27 @@ class PortalFeatures(unittest.TestCase):
         self.assertEqual(self.post('?new=1', self.admin, action='save', id=0, status='Offen', priority='Normal',
                                   email='other@example.com', subject='Angelegt', body='Test',
                                   files=[('attachments[]', 'Einrichtung.txt', BINARY)])[0], 303)
-        self.assertIn('Bericht.bin', self.page('?id=1', self.owner))
-        self.assertIn('Einrichtung.txt', self.page('?id=2', self.other))
+        for cookie in (self.owner, self.admin):
+            ticket = self.page('?id=1', cookie)
+            self.assertIn('class="image-preview" href="?anhang=1"', ticket)
+            self.assertIn('aria-label="Drucker.png vergrößern"', ticket)
+            self.assertIn('<dialog id="image-lightbox"', ticket)
+            self.assertIn('?datei=lightbox.js', ticket)
+            self.assertEqual(ticket.count('href="?anhang=1"'), 1)
+            self.assertNotIn('Drucker.png herunterladen', ticket)
+            self.assertIn('href="?anhang=2">Bericht.bin</a>', ticket)
+        file_only = self.page('?id=2', self.other)
+        self.assertIn('Einrichtung.txt', file_only)
+        self.assertNotIn('image-lightbox', file_only)
+        js_status, js_headers, js = self.http('?datei=lightbox.js')
+        self.assertEqual((js_status, js_headers['Content-Type']), (200, 'text/javascript; charset=UTF-8'))
+        self.assertIn(b'lightbox.showModal()', js)
         self.assertEqual(self.http('?anhang=1', self.other)[0], 404)
         self.assertEqual(self.http('?anhang=1')[0], 404)
-        status, headers, body = self.http('?anhang=1&vorschau=1', self.owner)
-        self.assertEqual((status, headers['Content-Type'], body), (200, 'image/png', PNG))
-        self.assertIn('inline', headers['Content-Disposition'])
+        for path in ('?anhang=1', '?anhang=1&vorschau=1'):
+            status, headers, body = self.http(path, self.owner)
+            self.assertEqual((status, headers['Content-Type'], body), (200, 'image/png', PNG))
+            self.assertIn('inline', headers['Content-Disposition'])
         status, headers, body = self.http('?anhang=2&vorschau=1', self.owner)
         self.assertEqual((status, headers['Content-Type'], body), (200, 'application/octet-stream', BINARY))
         self.assertIn('attachment', headers['Content-Disposition'])

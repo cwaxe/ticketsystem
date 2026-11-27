@@ -201,6 +201,12 @@ Ein Klick auf **Auf Updates prüfen** liest den freigegebenen GitHub-Stand und i
 
 Paket: `Waxenberger-Ticketportal-Vollpaket-v1.0.2.zip`.
 
+## 24. Version 1.0.3 mit HTTPS-Updates und Bild-Lightbox
+
+Der Updater liest den freigegebenen Branch über HTTPS aus dem öffentlichen GitHub-Repository. In der Konversation öffnen Kunden und Verwaltung Bildanhänge per Klick in einer Lightbox. Andere Dateianhänge behalten ihren Downloadlink.
+
+Paket: `Waxenberger-Ticketportal-Vollpaket-v1.0.3.zip`.
+
 ## Installation und Betrieb
 
 - [README.md](README.md) beschreibt Voraussetzungen, Neuinstallation, Update und Bedienung.

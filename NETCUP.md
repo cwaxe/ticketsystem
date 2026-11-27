@@ -56,12 +56,17 @@ Bei einem Update Konfiguration und bisherigen Datenordner behalten. Die Migratio
 
 ## 5. Updates über GitHub einrichten
 
-Ab Version 1.0.2 startet **Systemeinstellungen → Updates → Auf Updates prüfen** die Prüfung und Installation direkt. Das Menü zeigt nach dem Vorgang die installierte Version oder die Fehlermeldung. Eine gegebenenfalls eingerichtete Aufgabe `private/update.php --pending` kann deaktiviert werden. Dokumentenstamm und Mail-Aufgabe bleiben auf `public/` und `private/worker.php`.
+Unter **Systemeinstellungen → Updates → Auf Updates prüfen** prüft das Portal den Branch `release` und installiert eine neuere Version direkt. Seit Version 1.0.3 verwendet der Updater `https://github.com/cwaxe/ticketsystem.git`. Das Repository muss für diesen Abruf öffentlich sichtbar sein. GitHub-Zugangsdaten oder Deploy Keys sind dafür überflüssig.
 
-1. Beim ersten Wechsel auf Version 1.0.2 das Vollpaket bei Installationen ohne bereits per Git aktivierte Version einspielen. Bei Installationen mit aktivierter Git-Version kann der Hosting-Benutzer `php private/update.php --apply` einmal per SSH aufrufen.
-2. Im Hosting-Benutzerkonto einen SSH-Schlüssel für den Git-Zugriff einrichten und den öffentlichen Schlüssel im Repository `cwaxe/ticketsystem` unter **Settings → Deploy keys** als Leseschlüssel hinterlegen. Den privaten Schlüssel im Hosting-Konto belassen und der SSH-Konfiguration für `github.com` zuordnen. Den GitHub-Hostschlüssel nach Abgleich mit den offiziellen Fingerabdrücken in `known_hosts` hinterlegen. Der Prozess benötigt Zugriff auf diese SSH-Konfiguration und fragt kein Passwort ab.
-3. Der Web-PHP-Prozess benötigt `proc_open` und einen erreichbaren PHP-CLI-Interpreter mit den PHP-Modulen des Portals. Standardmäßig wird `php` aus dem Suchpfad verwendet. Bei Bedarf in `private/config.php` unter `update_php` den absoluten CLI-Pfad eintragen. Der CLI-Prozess benötigt ebenfalls `proc_open` sowie Git, SSH, `tar` und `cp`. Bei geänderten Abhängigkeiten benötigt er zusätzlich Composer. Bei Fehlern stehen technische Details im PHP-Fehlerprotokoll.
+Bei einer ZIP-Installation Version 1.0.3 einmal als Vollpaket einspielen. Bei einer Installation mit bereits per Git aktivierter Version brauchst du für den Wechsel noch den bisherigen Updater. Der folgende Aufruf in der SSH-Sitzung leitet seinen bisherigen GitHub-SSH-Abruf einmalig auf HTTPS um. Danach verwendet das Portal selbst HTTPS.
 
-Wer bereits SSH nutzt, kann vom Installationsordner aus direkt `php private/update.php --check` ausführen. `php private/update.php --apply` installiert den zuletzt veröffentlichten Stand aus dem Branch `release`, wenn seine Version höher ist als die installierte.
+```sh
+GIT_CONFIG_COUNT=1 \
+GIT_CONFIG_KEY_0=url.https://github.com/cwaxe/ticketsystem.git.insteadOf \
+GIT_CONFIG_VALUE_0=git@github.com:cwaxe/ticketsystem.git \
+php private/update.php --apply
+```
 
-[GitHub Deploy Keys](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys) · [GitHub SSH-Fingerabdrücke](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)
+Der Web-PHP-Prozess benötigt `proc_open` und einen erreichbaren PHP-CLI-Interpreter mit den PHP-Modulen des Portals. Standardmäßig wird `php` aus dem Suchpfad verwendet. Bei Bedarf in `private/config.php` unter `update_php` den absoluten CLI-Pfad eintragen. Der CLI-Prozess benötigt ebenfalls `proc_open` sowie Git mit HTTPS-Zugriff, `tar` und `cp`. Bei geänderten Abhängigkeiten benötigt er zusätzlich Composer. Bei Fehlern stehen technische Details im PHP-Fehlerprotokoll.
+
+Eine eventuell noch eingerichtete Update-Aufgabe mit `--pending` kann deaktiviert werden. Dokumentenstamm und Mail-Aufgabe bleiben auf `public/` und `private/worker.php`.

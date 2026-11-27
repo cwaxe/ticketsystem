@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/update-state.php';
 
-const GIT_UPDATE_REMOTE = 'git@github.com:cwaxe/ticketsystem.git';
+const GIT_UPDATE_REMOTE = 'https://github.com/cwaxe/ticketsystem.git';
 const GIT_UPDATE_BRANCH = 'refs/heads/release';
 
 function runUpdateCommand(array $arguments, ?string $outputFile = null): string
@@ -55,7 +55,7 @@ function gitUpdateCandidate(string $mirror): array
         runUpdateCommand(['git', 'init', '--bare', $mirror]);
     }
     $git = ['git', '--git-dir=' . $mirror];
-    runUpdateCommand([...$git, '-c', 'core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2',
+    runUpdateCommand([...$git, '-c', 'credential.helper=', '-c', 'http.sslVerify=true',
         'fetch', '--no-tags', '--no-recurse-submodules', GIT_UPDATE_REMOTE, GIT_UPDATE_BRANCH . ':' . GIT_UPDATE_BRANCH]);
     $commit = trim(runUpdateCommand([...$git, 'rev-parse', '--verify', GIT_UPDATE_BRANCH . '^{commit}']));
     $version = trim(runUpdateCommand([...$git, 'show', $commit . ':private/version.txt']));

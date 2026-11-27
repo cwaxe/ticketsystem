@@ -70,7 +70,7 @@ function previewableAttachment(string $type): bool
     return in_array($type, ['image/png', 'image/jpeg', 'image/gif', 'image/webp'], true);
 }
 
-function sendTicketAttachment(PDO $db, int $id, ?array $user, bool $preview): never
+function sendTicketAttachment(PDO $db, int $id, ?array $user): never
 {
     $file = $user ? query($db, 'SELECT a.filename, a.media_type, a.contents
         FROM ticket_attachments a JOIN tickets t ON t.id = a.ticket_id
@@ -81,7 +81,7 @@ function sendTicketAttachment(PDO $db, int $id, ?array $user, bool $preview): ne
         exit('Anhang nicht gefunden.');
     }
     session_write_close();
-    $inline = $preview && previewableAttachment($file['media_type']);
+    $inline = previewableAttachment($file['media_type']);
     header("Content-Security-Policy: default-src 'none'; sandbox");
     header('Content-Type: ' . ($inline ? $file['media_type'] : 'application/octet-stream'));
     header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') .

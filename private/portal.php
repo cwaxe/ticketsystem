@@ -59,7 +59,7 @@ try {
         $asset = field($_GET, 'datei');
         $type = match ($asset) {
             'style.css' => 'text/css; charset=UTF-8',
-            'signin.js' => 'text/javascript; charset=UTF-8',
+            'signin.js', 'lightbox.js' => 'text/javascript; charset=UTF-8',
             'logo.png', 'favicon-150.png', 'favicon-300.png' => 'image/png',
             default => '',
         };
@@ -121,7 +121,7 @@ try {
     $notice = '';
     $method = $_SERVER['REQUEST_METHOD'] ?? '';
     if ($method === 'GET' && isset($_GET['anhang'])) {
-        sendTicketAttachment($db, (int) field($_GET, 'anhang'), $user, field($_GET, 'vorschau') === '1');
+        sendTicketAttachment($db, (int) field($_GET, 'anhang'), $user);
     }
     if ($method === 'POST') {
         if (!$_POST && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0 &&
@@ -356,6 +356,7 @@ try {
     $id = (int) field($_GET, 'id');
     $new = $admin && field($_GET, 'new') === '1';
     $detail = null;
+    $hasImages = false;
     $conversation = [];
     $rows = [];
     $statusGroups = [];
@@ -387,6 +388,7 @@ try {
                 FROM ticket_attachments WHERE ticket_id = ? ORDER BY id', [$id]);
             foreach ($files as $file) {
                 $attachments[$file['comment_id'] ?? 0][] = $file;
+                $hasImages = $hasImages || previewableAttachment($file['media_type']);
             }
             $conversation = query($db, "SELECT c.role, c.body, c.created_at, c.id AS id, NULL AS old_status, NULL AS new_status,
                 0 AS status_event, COALESCE(parent.id, a.id, 0) AS activity_order, 1 AS event_order
@@ -495,6 +497,7 @@ try {
   <link rel="apple-touch-icon" href="?datei=favicon-300.png&amp;v=<?= h($installedVersion) ?>">
   <link rel="stylesheet" href="?datei=style.css&amp;v=<?= h($installedVersion) ?>">
   <?php if ($showLink): ?><script src="?datei=signin.js&amp;v=<?= h($installedVersion) ?>" defer></script><?php endif ?>
+  <?php if ($hasImages): ?><script src="?datei=lightbox.js&amp;v=<?= h($installedVersion) ?>" defer></script><?php endif ?>
 </head>
 <body>
 <header class="site-header">
@@ -791,11 +794,14 @@ try {
                     <?php foreach ($entryFiles as $file): ?>
                       <li>
                         <?php if (previewableAttachment($file['media_type'])): ?>
-                          <a href="?anhang=<?= h($file['id']) ?>" aria-label="<?= h($file['filename']) ?> herunterladen">
-                            <img src="?anhang=<?= h($file['id']) ?>&amp;vorschau=1" alt="" loading="lazy">
+                          <a class="image-preview" href="?anhang=<?= h($file['id']) ?>" aria-haspopup="dialog"
+                             aria-label="<?= h($file['filename']) ?> vergrößern" data-image-title="<?= h($file['filename']) ?>">
+                            <img src="?anhang=<?= h($file['id']) ?>" alt="" loading="lazy">
+                            <span><?= h($file['filename']) ?></span>
                           </a>
+                        <?php else: ?>
+                          <a href="?anhang=<?= h($file['id']) ?>"><?= h($file['filename']) ?></a>
                         <?php endif ?>
-                        <a href="?anhang=<?= h($file['id']) ?>"><?= h($file['filename']) ?></a>
                         <small><?= h(number_format($file['size'] / 1024, 1, ',', '.')) ?> KiB</small>
                       </li>
                     <?php endforeach ?>
@@ -814,6 +820,17 @@ try {
             </li>
           <?php endforeach ?>
         </ol>
+        <?php if ($hasImages): ?>
+          <dialog id="image-lightbox" class="image-lightbox" aria-label="Bildvorschau">
+            <form method="dialog">
+              <button type="submit" class="secondary" autofocus>Schließen</button>
+            </form>
+            <figure>
+              <img alt="">
+              <figcaption></figcaption>
+            </figure>
+          </dialog>
+        <?php endif ?>
         <?php if (!$closedTicket || !$admin): ?>
           <form id="antwort" class="editor conversation-reply" method="post" enctype="multipart/form-data" action="?<?= h(http_build_query(['id' => $detail['id']] + $groupContext)) ?>#antwort">
             <?= csrfInput() ?>
