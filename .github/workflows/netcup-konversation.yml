@@ -1,0 +1,64 @@
+name: netcup-Konversationsupdate bauen
+on:
+  push:
+    branches:
+      - build/netcup-konversation
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: PHP-Syntax und E-Mail-Zitate prüfen
+        run: |
+          php -l public/index.php
+          php -l private/app.php
+          php -l private/mail.php
+          php <<'PHP'
+          <?php
+          require 'private/app.php';
+          require 'private/mail.php';
+          $quote = "Gesendet: Freitag, 27. November 2026 um 14:32\r\n\r\nVon: IT-Service <ticket@example.net>\r\n\r\nAn: kunde@example.com\r\n\r\nBetreff: Kommentar zu Ticket T-0001\r\n\r\nFrühere Nachricht.";
+          [$reply, $history] = splitQuotedReply("Danke für die Info\r\n\r\n" . $quote);
+          if ($reply !== 'Danke für die Info' || !str_starts_with($history, 'Gesendet:')) {
+              throw new RuntimeException('Headerblock wurde nicht erkannt');
+          }
+          [$reply, $history] = splitQuotedReply("Passt.\n\nAm Freitag schrieb der IT-Service:\n> Frühere Antwort");
+          if ($reply !== 'Passt.' || !str_starts_with($history, 'Am Freitag')) {
+              throw new RuntimeException('Standardantwort wurde nicht getrennt');
+          }
+          [$reply, $history] = splitQuotedReply("Von: mir\nAn: morgen\n\nDiese Nachricht bleibt vollständig.");
+          if (!str_contains($reply, 'vollständig') || $history !== '') {
+              throw new RuntimeException('Der Nachrichtentext wurde irrtümlich getrennt');
+          }
+          $stored = replyComment(['body' => "Danke!\r\n\r\n" . $quote . "\r\nhttps://tickets.invalid/?link=1#" . str_repeat('a', 64), 'attachments' => 1]);
+          [$reply, $history] = splitQuotedReply($stored);
+          if (!str_contains($reply, 'Anhänge') || str_contains($history, str_repeat('a', 64))) {
+              throw new RuntimeException('Anhänge oder Link-Fragmente wurden falsch behandelt');
+          }
+          [$subject, $body] = outboxMessage(new PDO('sqlite::memory:'), ['base_url' => 'https://tickets.invalid/'], [
+              'ticket_id' => 1, 'role' => 'admin', 'comment_body' => $stored,
+          ]);
+          if (!str_contains($body, 'Danke!') || str_contains($body, 'Frühere Nachricht')) {
+              throw new RuntimeException('Die Adminbenachrichtigung enthält das Zitat');
+          }
+          PHP
+      - name: Installationsdateien zusammenstellen
+        run: |
+          composer install --working-dir=private --no-dev --no-interaction --prefer-dist --no-scripts
+          php private/worker.php --check
+          mkdir netcup
+          cp -R private public README.md NETCUP.md netcup/
+          test ! -f netcup/private/config.php
+          test ! -d netcup/private/data
+      - name: Vollpaket bereitstellen
+        uses: actions/upload-artifact@v4
+        with:
+          name: Waxenberger-Ticketportal-Vollpaket-Konversation
+          path: netcup/
+          if-no-files-found: error
+          retention-days: 30
