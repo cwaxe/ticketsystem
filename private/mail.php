@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 use ZBateson\MailMimeParser\Header\AddressHeader;
+use ZBateson\MailMimeParser\Header\IdHeader;
 use ZBateson\MailMimeParser\Message;
 
 function smtpMessageId(array $config, int|string $id): string
@@ -93,7 +94,9 @@ function deliverOutbox(PDO $db, array $config, ?callable $send = null): array
     query($db, 'DELETE FROM links WHERE expires_at <= ?', [$now]);
     query($db, 'DELETE FROM rate_limits WHERE expires_at <= ?', [$now]);
     query($db, 'DELETE FROM outbox WHERE ticket_id IS NULL AND created_at <= ?', [$now - LINK_SECONDS]);
-    $rows = query($db, 'SELECT * FROM outbox WHERE next_attempt <= ? ORDER BY next_attempt, id LIMIT 15', [$now])->fetchAll();
+    $rows = query($db, 'SELECT o.*, c.body AS comment_body FROM outbox o
+        LEFT JOIN comment_notifications n ON n.outbox_id = o.id LEFT JOIN ticket_comments c ON c.id = n.comment_id
+        WHERE o.next_attempt <= ? ORDER BY o.next_attempt, o.id LIMIT 15', [$now])->fetchAll();
     $failures = 0;
     $sent = 0;
     foreach ($rows as $row) {
@@ -101,6 +104,14 @@ function deliverOutbox(PDO $db, array $config, ?callable $send = null): array
         if ($row['role'] === 'admin' && $row['email'] !== $config['admin_email']) {
             query($db, 'DELETE FROM outbox WHERE id = ?', [$id]);
             continue;
+        }
+        if ($row['role'] === 'customer' && $row['ticket_id'] !== null) {
+            $reference = query($db, 'INSERT INTO ticket_mail_references (message_id, ticket_id)
+                SELECT ?, ticket_id FROM outbox WHERE id = ?
+                ON CONFLICT(message_id) DO UPDATE SET ticket_id = excluded.ticket_id', [smtpMessageId($config, $id), $id]);
+            if ($reference->rowCount() === 0) {
+                continue;
+            }
         }
         [$subject, $body] = outboxMessage($db, $config, $row);
         try {
@@ -119,6 +130,16 @@ function deliverOutbox(PDO $db, array $config, ?callable $send = null): array
 
 function outboxMessage(PDO $db, array $config, array $row): array
 {
+    if (($row['comment_body'] ?? null) !== null) {
+        $ticket = (int) $row['ticket_id'];
+        $code = ticketCode($ticket);
+        return [
+            'Kommentar zu Ticket ' . $code,
+            "Guten Tag,\n\nzu Ihrem Ticket " . $code . " gibt es einen neuen Kommentar vom IT-Service:\n\n"
+                . $row['comment_body'] . "\n\nSie können direkt auf diese E-Mail antworten. Ihre Antwort wird dem Ticket zugeordnet.\n\n"
+                . "Zum Ticketportal:\n" . $config['base_url'] . '?id=' . $ticket . "\n\nIT-Service Waxenberger",
+        ];
+    }
     if ($row['role'] === 'admin' && $row['ticket_id'] !== null) {
         $code = ticketCode((int) $row['ticket_id']);
         return [
@@ -144,7 +165,8 @@ function outboxMessage(PDO $db, array $config, array $row): array
     $subject = 'Ihr Anmeldelink zum Ticketportal';
     if ($row['ticket_id'] !== null) {
         $code = ticketCode((int) $row['ticket_id']);
-        $intro = "Vielen Dank für Ihre Nachricht. Wir haben Ihr Anliegen als Ticket " . $code . " erfasst.";
+        $intro = "Vielen Dank für Ihre Nachricht. Wir haben Ihr Anliegen als Ticket " . $code . " erfasst.\n"
+            . "Sie können direkt auf diese E-Mail antworten. Ihre Antwort wird dem Ticket zugeordnet.";
         $subject = 'Eingangsbestätigung ' . $code;
     }
     $body = "Guten Tag,\n\n" . $intro . "\n\nÜber diesen persönlichen Link gelangen Sie zu Ihrem Ticketportal:\n\n"
@@ -190,11 +212,19 @@ function parseTicketMail(string $raw, bool $limited, array $config): ?array
     }
     $subject = trim(preg_replace('/\s+/u', ' ', mb_scrub($message->getSubject() ?? '', 'UTF-8')));
     $messageId = trim($message->getMessageId() ?? '', " \t\r\n<>");
+    $directReferences = $message->getHeaderAs('In-Reply-To', IdHeader::class)?->getIds() ?? [];
+    $ancestors = $message->getHeaderAs('References', IdHeader::class)?->getIds() ?? [];
+    $references = array_merge(array_slice($directReferences, 0, 20), array_reverse(array_slice($ancestors, -50)));
+    $references = array_values(array_unique(array_map(
+        static fn (string $reference): string => '<' . trim($reference, " \t\r\n<>") . '>',
+        $references
+    )));
     return [
         'email' => $sender,
         'subject' => $subject !== '' ? mb_substr($subject, 0, 180) : '(Ohne Betreff)',
         'body' => $body,
         'attachments' => (int) (!$limited && $message->getAttachmentCount() > 0),
         'message_id' => $messageId !== '' ? '<' . $messageId . '>' : '',
+        'references' => $references,
     ];
 }

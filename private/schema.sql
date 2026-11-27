@@ -87,5 +87,15 @@ CREATE TABLE IF NOT EXISTS ticket_customers (
 );
 CREATE INDEX IF NOT EXISTS ticket_customers_customer ON ticket_customers(customer_id, ticket_id);
 
-PRAGMA user_version = 2;
+CREATE TABLE IF NOT EXISTS comment_notifications (
+    outbox_id INTEGER PRIMARY KEY REFERENCES outbox(id) ON DELETE CASCADE,
+    comment_id INTEGER NOT NULL REFERENCES ticket_comments(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS ticket_mail_references (
+    message_id TEXT PRIMARY KEY,
+    ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ticket_mail_references_ticket ON ticket_mail_references(ticket_id);
+
+PRAGMA user_version = 3;
 COMMIT;

@@ -145,17 +145,9 @@ try {
                 if (strlen($comment) > MAX_COMMENT_LENGTH * 4 ||
                     !preg_match('/\A.{1,' . MAX_COMMENT_LENGTH . '}\z/su', $comment)) {
                     $notice = 'Bitte geben Sie einen Kommentar mit höchstens ' . MAX_COMMENT_LENGTH . ' Zeichen ein.';
+                } elseif (addPortalComment($db, $id, $user, $comment)) {
+                    go($config, '?' . http_build_query(['id' => $id] + $groupContext) . '#kommentare');
                 } else {
-                    $params = [$user['role'], $comment, time(), $id];
-                    if (!$admin) {
-                        $params[] = $user['email'];
-                    }
-                    $added = query($db, "INSERT INTO ticket_comments (ticket_id, role, body, created_at)
-                        SELECT id, ?, ?, ? FROM tickets WHERE id = ? AND status <> 'Erledigt'" .
-                        ($admin ? '' : ' AND email = ?'), $params);
-                    if ($added->rowCount() > 0) {
-                        go($config, '?id=' . $id . '#kommentare');
-                    }
                     $notice = 'Dieses Ticket ist bereits geschlossen.';
                 }
             }
@@ -492,7 +484,7 @@ try {
           <form class="editor" method="post" action="?id=<?= h($detail['id']) ?>#kommentare">
             <?= csrfInput() ?>
             <label>Kommentar für Kunde und IT-Service<textarea name="comment" rows="4" maxlength="<?= MAX_COMMENT_LENGTH ?>" required><?= h(field($_POST, 'comment')) ?></textarea></label>
-            <button name="action" value="comment">Kommentar hinzufügen</button>
+            <button name="action" value="comment"><?= $admin ? 'Kommentar hinzufügen und Kunde benachrichtigen' : 'Kommentar hinzufügen' ?></button>
           </form>
         <?php endif ?>
       </section>
