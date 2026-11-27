@@ -88,6 +88,51 @@ td small { display: block; margin-top: 2px }
 .ticket-heading h2 { font-size: clamp(20px, 3vw, 25px); margin-bottom: 6px }
 .ticket-heading .meta:last-child { overflow-wrap: anywhere; margin-bottom: 0 }
 .ticket-reference { margin-bottom: 4px }
+.ticket-heading-closed {
+    position: relative;
+    align-items: center;
+    background: #f3fbf5;
+    border-color: #cde4d5;
+}
+.ticket-heading-closed::before {
+    content: "";
+    position: absolute;
+    inset: 10px auto 10px -1px;
+    width: 4px;
+    border-radius: 2px;
+    background: #288250;
+}
+.ticket-heading-closed .ticket-reference { color: #3f596b; font-size: 13px; font-weight: bold }
+.ticket-heading-closed .ticket-closed-at { color: #496357; margin-bottom: 4px }
+.ticket-closed-status {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 8px;
+    padding: 6px 12px 6px 7px;
+    color: #145535;
+    background: #e0f3e7;
+    border: 1px solid #b8dac5;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: bold;
+}
+.ticket-closed-check {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #1d7043;
+}
+.ticket-closed-check::before {
+    content: "";
+    width: 8px;
+    height: 4px;
+    border: solid var(--white);
+    border-width: 0 0 2px 2px;
+    transform: translateY(-1px) rotate(-45deg);
+}
 .conversation, .ticket-tools { margin-top: 16px }
 .conversation-list { list-style: none; display: grid; gap: 16px; padding: 0; margin: 16px 0 0 }
 .conversation-entry { display: grid; justify-items: start; min-width: 0 }

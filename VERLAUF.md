@@ -105,7 +105,15 @@ Die Adminbenachrichtigung für neue Tickets enthält Absender, Betreff und über
 
 Der lokale SMTP-Test prüfte den Inhalt in HTML und Text für neue Tickets, Portal-Kommentare und E-Mail-Antworten.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Admin-Mails.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Admin-Mails.zip`.
+
+## 12. Abschlussanzeige und Bearbeitung oberhalb der Konversation
+
+Erledigte Tickets zeigen einen grünen Ticketkopf und ein Abzeichen mit Haken. Ein vorhandener Abschlusszeitpunkt erscheint unter dem Betreff. In der Verwaltung befindet sich **Ticket bearbeiten** direkt oberhalb der Konversation.
+
+Der lokale Test prüfte abgeschlossene, ältere und wieder geöffnete Tickets sowie die Rollen und das Bearbeitungsformular.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Erledigt.zip`.
 
 ## Installation und Betrieb
 
