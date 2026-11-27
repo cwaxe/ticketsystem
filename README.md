@@ -1,26 +1,19 @@
 # Ticketportal · IT-Service Waxenberger
 
-Quellcode für eigenen PHP-Webspace. Kunden schicken ihre Anfrage an **ticket@edv-waxenberger.de**. Der regelmäßige PHP-Job liest das Postfach direkt per verschlüsseltem IMAP. Das Portal legt ein Ticket an und verschickt die Eingangsbestätigung sowie eine Adminbenachrichtigung per authentifiziertem SMTP.
+Quellcode für das Ticketportal auf eigenem PHP-Webspace. Kunden schicken ihre Anfrage an **ticket@edv-waxenberger.de**. Der PHP-Job liest das Postfach per verschlüsseltem IMAP und legt Tickets an. Die Eingangsbestätigung und die Benachrichtigung für die Verwaltung gehen per authentifiziertem SMTP raus. Die vollständige netcup-ZIP enthält die PHP-Abhängigkeiten. Im Git-Checkout werden sie mit Composer installiert.
 
-Für netcup Webhosting siehe [NETCUP.md](NETCUP.md) mit den Schritten im WCP und dem PHP-Kompatibilitätstest.
+Für netcup Webhosting siehe [NETCUP.md](NETCUP.md). Die Entwicklung und die Änderungen pro Paket sind in [VERLAUF.md](VERLAUF.md) dokumentiert.
 
 ## Voraussetzungen
 
-- PHP ab 8.2, mit `pdo_sqlite` und SQLite ab 3.35. Für den Mailjob braucht PHP-CLI zusätzlich OpenSSL, `mbstring` und `curl` mit SMTP-Unterstützung. Die PHP-Abhängigkeiten werden mit Composer installiert.
-- Eigene HTTPS-Adresse, zum Beispiel `tickets.edv-waxenberger.de`, mit einem einstellbaren Dokumentenstamm. Ein Unterverzeichnis ist möglich, wenn sein Inhalt auf `public/` abgebildet wird und `private/` außerhalb aller öffentlich erreichbaren Verzeichnisse liegt.
+- PHP ab 8.2, mit `pdo_sqlite` und SQLite ab 3.35. PHP-CLI für den Mailjob benötigt zusätzlich OpenSSL, `mbstring` und `curl` mit SMTP/SMTPS.
+- Eigene HTTPS-Adresse, zum Beispiel `ticket.edv-waxenberger.de`, mit einem einstellbaren Dokumentenstamm. Ein Unterverzeichnis ist möglich, wenn sein Inhalt auf `public/` abgebildet wird und `private/` außerhalb aller öffentlich erreichbaren Verzeichnisse liegt.
 - Cronjob beziehungsweise geplante CLI-Aufgabe auf dem Webspace. PHP-Webprozess und Cron müssen auf dieselbe private SQLite-Datei und das Sitzungsverzeichnis schreiben können. Das Beispiel setzt voraus, dass beide unter dem eigenen Hosting-Benutzer laufen.
 - Das Postfach muss IMAP mit implizitem TLS und SMTP mit SMTP-Authentifizierung über TLS unterstützen. Bei einem Anbieter mit reinem OAuth-Zugang muss die Mailanbindung angepasst werden.
 
 ## Installation
 
-1. Abhängigkeiten installieren und `public/` sowie `private/` auf den Webspace übertragen. Composer kann vor dem Upload lokal ausgeführt werden.
-
-   ```sh
-   composer install --working-dir=private --no-dev --prefer-dist
-   php private/worker.php --check
-   ```
-
-   Als Dokumentenstamm der Ticket-Subdomain den Ordner `public/` einstellen. `private/` bleibt ein Geschwisterordner außerhalb des Dokumentenstamms. Auch die Hauptwebsite darf ihn nicht ausliefern.
+1. ZIP auf dem Webspace entpacken. Wenn du aus diesem Git-Repository installierst, führe vorher `composer install --working-dir=private --no-dev --prefer-dist` aus und übertrage auch `private/vendor/`. Als Dokumentenstamm der Ticket-Subdomain den Ordner `public/` einstellen. `private/` bleibt ein Geschwisterordner außerhalb des Dokumentenstamms. Auch die Hauptwebsite darf ihn nicht ausliefern.
 2. `private/config.example.php` als `private/config.php` kopieren. Produktions-URL, eine eigene vom Ticketpostfach getrennte Admin-Adresse, IMAP- und SMTP-Server sowie Zugangsdaten eintragen. Schlüssel beispielsweise mit `php -r 'echo bin2hex(random_bytes(32)), PHP_EOL;'` erzeugen. Konfiguration nur dem Hosting-Benutzer zugänglich machen, üblicherweise mit `chmod 600 private/config.php`. Zugangsdaten bleiben auf dem Webspace.
 3. Datenbank einrichten und das Postfach initialisieren. `--init` merkt sich den aktuellen Stand. Erst danach eingegangene Nachrichten werden importiert. Für einen bewussten Import des gesamten bisherigen Posteingangs stattdessen `--import-existing` verwenden. Dabei werden auch für bestehende Nachrichten Bestätigungen verschickt.
 
@@ -35,13 +28,20 @@ Für netcup Webhosting siehe [NETCUP.md](NETCUP.md) mit den Schritten im WCP und
    ```
 5. Nach der Initialisierung von einer separaten Testadresse eine Testmail ans Ticketpostfach schicken. Nach dem Cronlauf die Bestätigung öffnen und auf **Anmelden** klicken. In der Verwaltung einen Status ändern und mit der Testadresse prüfen, ob der neue Status sichtbar ist. Eine zweite Absenderadresse sollte nur ihre eigenen Tickets sehen.
 
+## Bestehende Installation aktualisieren
+
+Sichere die SQLite-Datenbank und die Konfiguration. Entpacke die ZIP dort, wo `public/` und `private/` bereits liegen, und ersetze die enthaltenen Dateien. `private/config.php` und `private/data/` gehören zur bestehenden Installation. Beim nächsten Aufruf wird die Datenbank automatisch erweitert. Die laufende Aufgabe `private/worker.php` verwendet weiterhin ein leeres Argumentfeld.
+
 ## Bedienung
 
-- Kunden sehen die Tickets ihrer jeweiligen Absenderadresse und deren Status. Sie können Kommentare hinzufügen und eigene Tickets auf **Erledigt** setzen. Der Anmeldelink gilt höchstens 24 Stunden und kann einmal verwendet werden. Die Anmeldung wird im Portal bestätigt, damit ein bloßer Linkabruf durch einen E-Mail-Scanner den Link nicht verbraucht. Im Kundenportal lassen sich neue Links anfordern.
-- Dein Zugang liegt unter **Verwaltung** im Fußbereich. Der Verwaltungslink wird ausschließlich an die konfigurierte Admin-Adresse geschickt. Im Arbeitsbereich kannst du Tickets anlegen, suchen, nach Status filtern, bearbeiten und löschen sowie Kundenkommentare beantworten. Unter **Bearbeitungszeiten** siehst du die verstrichene Zeit vom Eingang bis zum Schließen. Interne Notizen, Prioritäten und Fälligkeiten stehen nur in der Verwaltung.
-- Die E-Mails bleiben im Ticketpostfach. Der Import übernimmt den Text und kennzeichnet Anhänge, die im Originalpostfach bleiben. Jede neue, reguläre E-Mail wird als eigenes Ticket erfasst. Automatische Antworten und viele Verteiler- oder Unzustellbarkeitsnachrichten werden übersprungen.
+- Kunden sehen die Tickets ihrer jeweiligen Absenderadresse und deren Status. Sie können Kommentare hinzufügen und eigene Tickets schließen. Der Anmeldelink gilt höchstens 24 Stunden und kann einmal verwendet werden. Die Anmeldung wird im Portal bestätigt, damit ein bloßer Linkabruf durch einen E-Mail-Scanner den Link nicht verbraucht. Im Kundenportal lassen sich neue Links anfordern.
+- Ein Verwaltungskommentar löst eine E-Mail an die Absenderadresse des Tickets aus. Kunden können von dieser Adresse direkt auf die Benachrichtigung oder eine mit diesem Stand verschickte Eingangsbestätigung antworten. Der Mailjob erkennt die Antwort über die Nachrichtenreferenz und fügt sie als Kundenkommentar in den Ticketverlauf ein. Bei Antworten auf erledigte Tickets bleibt der Status erhalten.
+- Dein Zugang liegt unter **Verwaltung** im Fußbereich. Der Verwaltungslink wird ausschließlich an die konfigurierte Admin-Adresse geschickt. Im Arbeitsbereich kannst du Tickets anlegen, suchen, nach Status filtern, bearbeiten und löschen. Interne Notizen, Prioritäten und Fälligkeiten stehen nur in der Verwaltung.
+- Im Ticket kannst du unter **Kundenzuordnung** einen vorhandenen Kunden auswählen oder mit einem Namen neu anlegen. Weitere bereits zugeordnete Tickets mit derselben Absenderdomain liefern Vorschläge. **Nach Kunden gruppieren** verwendet deine gespeicherten Zuordnungen. Tickets ohne Zuordnung findest du unter **Ohne Kundenzuordnung**.
+- Unter **Bearbeitungszeiten** siehst du die verstrichene Zeit vom Eingang bis zum Schließen. Mit `php private/admin-login.php --send` kannst du als Hosting-Administrator einen Admin-Einmal-Link anfordern, falls das Webformular sein Limit erreicht hat.
+- Die E-Mails bleiben im Ticketpostfach. Der Import übernimmt den Text und kennzeichnet Anhänge, die im Originalpostfach bleiben. Reguläre Nachrichten ohne passende Nachrichtenreferenz und Absenderadresse werden als neue Tickets erfasst. Automatische Antworten und viele Verteiler- oder Unzustellbarkeitsnachrichten werden übersprungen.
 - Wenn der SMTP-Server einen Versand ablehnt, bleibt dieser in der Warteschlange und wird erneut versucht. `php private/worker.php --send-only` verarbeitet testweise nur den Versand. Bei einer Verbindungstrennung nach Annahme durch den SMTP-Server kann eine Bestätigung erneut versandt werden.
 - Nach Änderung der IMAP-UIDVALIDITY hält der Import an. Dann bewusst neu initialisieren. Eine vorhandene Message-ID je Absender dient der Deduplizierung. Für Nachrichten ohne Message-ID steht nach einem UID-Reset keine zuverlässige Zuordnung zu vorher importierten Nachrichten zur Verfügung.
-- Sichere die SQLite-Datenbank konsistent, etwa mit der SQLite-Backup-Funktion, sowie die Konfiguration. Bei einer bestehenden Installation wird die SQLite-Datenbank beim nächsten Aufruf automatisch erweitert.
+- Sichere die SQLite-Datenbank regelmäßig konsistent, etwa mit der SQLite-Backup-Funktion, sowie die Konfiguration.
 
-Logo und Gestaltung orientieren sich an der Firmenwebsite. Die Links für Impressum und Datenschutz führen zu den bestehenden Seiten. Prüfe vor Freigabe, ob die Datenschutzhinweise die Verarbeitung im neuen Ticketportal abdecken.
+Logo und Favicon stammen von der Firmenwebsite. Die Links für Impressum und Datenschutz führen zu den bestehenden Seiten.
