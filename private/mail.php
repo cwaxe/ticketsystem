@@ -17,7 +17,7 @@ function encodeMailPart(string $content): string
     return quoted_printable_encode(preg_replace("/\r\n|\r|\n/", "\r\n", $content));
 }
 
-function renderHtmlMail(string $baseUrl, string $subject, string $body, string $signature): string
+function renderHtmlMail(string $baseUrl, string $subject, string $body, string $signature, ?string $logoCid = null): string
 {
     $escape = static fn (string $text): string => htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     $body = preg_replace("/\r\n|\r/", "\n", $body);
@@ -39,6 +39,10 @@ function renderHtmlMail(string $baseUrl, string $subject, string $body, string $
         $sections .= '<p style="margin:0 0 16px">' . implode('<br>', $content) . '</p>';
     }
     $heading = $escape($subject);
+    $header = $logoCid === null
+        ? '<td style="padding:18px 24px;background:#0d3082;color:#ffffff;font-size:16px;font-weight:bold">Ticketportal</td>'
+        : '<td style="padding:12px 24px;border-bottom:3px solid #0d3082"><img src="cid:' . $escape($logoCid)
+            . '" width="175" height="60" alt="IT-Service Waxenberger" style="display:block;border:0"></td>';
     $footer = $signature === '' ? '' : '<div style="border-top:1px solid #d3def3;padding-top:16px;margin-top:24px;color:#294475">'
         . nl2br($escape($signature), false) . '</div>';
     return <<<HTML
@@ -49,7 +53,7 @@ function renderHtmlMail(string $baseUrl, string $subject, string $body, string $
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7fc">
   <tr><td align="center" style="padding:24px 12px">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;font-family:Arial,sans-serif">
-      <tr><td style="padding:18px 24px;background:#0d3082;color:#ffffff;font-size:16px;font-weight:bold">Ticketportal</td></tr>
+      <tr>{$header}</tr>
       <tr><td style="padding:24px;font-size:16px;line-height:1.55">
         <h1 style="margin:0 0 20px;font-size:22px;line-height:1.3;color:#0d3082">{$heading}</h1>
         {$sections}{$footer}
@@ -78,11 +82,31 @@ function smtpSend(array $config, string $address, string $subject, string $body,
     $sender = $config['mail_email'];
     $boundary = 'ticket_' . bin2hex(random_bytes(16));
     $signature = $config['mail_signature'] ?? DEFAULT_MAIL_SIGNATURE;
+    $logo = ($config['show_company_logo'] ?? false) ? @file_get_contents(dirname(__DIR__) . '/public/logo.png') : false;
+    $logoCid = $logo === false ? null : $boundary . '@' . emailDomain($sender);
     $body = trim($body);
-    $html = renderHtmlMail($config['base_url'], $subject, $body, $signature);
+    $html = renderHtmlMail($config['base_url'], $subject, $body, $signature, $logoCid);
     $plain = $signature === '' ? $body : $body . "\n\n" . $signature;
     if (preg_match('/[^\x20-\x7e]/', $subject)) {
         $subject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+    }
+    $htmlPart = ['Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: quoted-printable', '', encodeMailPart($html)];
+    if ($logoCid !== null) {
+        $related = $boundary . '_related';
+        $htmlPart = [
+            'Content-Type: multipart/related; type="text/html"; boundary="' . $related . '"',
+            '',
+            '--' . $related,
+            ...$htmlPart,
+            '--' . $related,
+            'Content-Type: image/png',
+            'Content-Transfer-Encoding: base64',
+            'Content-ID: <' . $logoCid . '>',
+            'Content-Disposition: inline; filename="logo.png"',
+            '',
+            rtrim(chunk_split(base64_encode($logo))),
+            '--' . $related . '--',
+        ];
     }
     $message = implode("\r\n", [
         'Date: ' . gmdate('D, d M Y H:i:s') . ' +0000',
@@ -101,10 +125,7 @@ function smtpSend(array $config, string $address, string $subject, string $body,
         '',
         encodeMailPart($plain),
         '--' . $boundary,
-        'Content-Type: text/html; charset=UTF-8',
-        'Content-Transfer-Encoding: quoted-printable',
-        '',
-        encodeMailPart($html),
+        ...$htmlPart,
         '--' . $boundary . '--',
         '',
     ]);
@@ -180,7 +201,7 @@ function deliverOutbox(PDO $db, array $config, ?callable $send = null): array
         }
         [$subject, $body] = outboxMessage($db, $config, $row);
         try {
-            $send($config, $row['email'], $subject, $body, $id);
+            $send(['show_company_logo' => $row['new_status'] !== null] + $config, $row['email'], $subject, $body, $id);
             query($db, 'DELETE FROM outbox WHERE id = ?', [$id]);
             $sent++;
         } catch (RuntimeException $error) {

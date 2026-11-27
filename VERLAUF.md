@@ -95,7 +95,9 @@ Die Ticketlisten sortieren nach Status. Die Verwaltung kann zwischen allen Ticke
 
 Der lokale Test deckte die Migration, uneindeutige Altzuordnungen, importierte und manuell angelegte Tickets sowie Statusgruppen, Filter und Neu-Markierungen ab.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Kunden-Status-Neue-Tickets.zip`.
+Die HTML-Fassung von Statusmails enthält das eingebettete Firmenlogo. Die Textfassung bleibt verfügbar.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Kunden-Status-Logo.zip`.
 
 ## Installation und Betrieb
 
