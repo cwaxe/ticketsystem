@@ -76,10 +76,38 @@ td small { display: block; margin-top: 2px }
 .detail { padding: clamp(15px, 4vw, 25px) }
 .meta { font-size: 14px }
 .meta .badge { margin-right: 7px }
-.message { background: #f5f8ff; border: 1px solid var(--line); border-radius: 4px; padding: 14px; margin: 16px 0; white-space: pre-wrap; overflow-wrap: anywhere }
-.comments { margin-top: 18px }
-.ticket-comment .meta { margin-bottom: 4px }
-.ticket-comment .message { margin: 0 0 14px }
+.ticket-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.ticket-heading h2 { font-size: clamp(20px, 3vw, 25px); margin-bottom: 6px }
+.ticket-heading .meta:last-child { overflow-wrap: anywhere; margin-bottom: 0 }
+.ticket-reference { margin-bottom: 4px }
+.conversation, .ticket-tools { margin-top: 16px }
+.conversation-list { list-style: none; display: grid; gap: 16px; padding: 0; margin: 16px 0 0 }
+.conversation-entry { display: grid; justify-items: start; min-width: 0 }
+.conversation-entry-service { justify-items: end }
+.conversation-byline { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; margin: 0 4px 4px; font-size: 13px; color: var(--text) }
+.conversation-byline time { white-space: nowrap }
+.conversation-bubble {
+    max-width: min(100%, 68ch);
+    min-width: 0;
+    padding: 10px 14px;
+    background: #f5f8ff;
+    border: 1px solid var(--line);
+    border-radius: 4px 13px 13px 13px;
+}
+.conversation-entry-service .conversation-bubble { background: var(--pale); border-radius: 13px 4px 13px 13px }
+.conversation-text { color: #18284b; white-space: pre-wrap; overflow-wrap: anywhere }
+.conversation-attachment { margin: 7px 0 0; font-size: 13px; color: var(--text) }
+.conversation-quote { margin-top: 9px; font-size: 13px; color: var(--text) }
+.conversation-quote summary, .ticket-tools > summary { cursor: pointer }
+.conversation-quote .conversation-text { margin-top: 7px; padding-left: 9px; border-left: 2px solid var(--line) }
+.conversation-reply { border-top: 1px solid var(--line); padding-top: 16px; scroll-margin-top: 12px }
+.ticket-tools > summary { font-weight: bold }
 .customer-assignment { margin: 20px 0; padding: 14px; border: 1px solid var(--line); border-radius: 6px }
 .customer-assignment p { overflow-wrap: anywhere }
 .customer-assignment .editor { margin-top: 12px }

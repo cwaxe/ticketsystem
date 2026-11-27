@@ -240,17 +240,42 @@ function referencedTicket(PDO $db, string $sender, array $references): ?int
     return null;
 }
 
+function splitQuotedReply(string $body): array
+{
+    $body = trim(str_replace(["\r\n", "\r"], "\n", $body));
+    $body = preg_replace('/(\?link=1)#[a-f0-9]{64}\b/i', '$1', $body);
+    $offset = strlen($body);
+    $markers = '/^\h*(?:-{2,}\h*(?:Original Message|Ursprüngliche Nachricht|Weitergeleitete Nachricht)\h*-{2,}|On\h+[^\n]+\h+wrote:|Am\h+[^\n]+\h+schrieb[^\n]*:)\h*$/imu';
+    if (preg_match($markers, $body, $marker, PREG_OFFSET_CAPTURE)) {
+        $offset = $marker[0][1];
+    }
+    $fields = '(?:Von|From|Gesendet|Sent|Datum|Date|An|To|Cc|Betreff|Subject)';
+    if (preg_match_all('/^(?:\h*' . $fields . '\h*:[^\n]*(?:\n|$)\n*){3,}/imu',
+        $body, $headerBlocks, PREG_OFFSET_CAPTURE)) {
+        foreach ($headerBlocks[0] as [$block, $start]) {
+            if (preg_match('/^\h*(?:Von|From)\h*:/imu', $block) &&
+                preg_match('/^\h*(?:Betreff|Subject)\h*:/imu', $block) &&
+                preg_match('/^\h*(?:Gesendet|Sent|Datum|Date|An|To)\h*:/imu', $block)) {
+                $offset = min($offset, $start);
+                break;
+            }
+        }
+    }
+    if (preg_match('/^\h*>[^\n]*(?:\n(?:\h*>[^\n]*|\h*))*\z/mu', $body, $quote, PREG_OFFSET_CAPTURE)) {
+        $offset = min($offset, $quote[0][1]);
+    }
+
+    return [trim(substr($body, 0, $offset)), trim(substr($body, $offset))];
+}
+
 function replyComment(array $mail): string
 {
-    $parts = preg_split('/^\h*-{2,}\h*(?:Original Message|Ursprüngliche Nachricht)\h*-{2,}\h*$/imu', $mail['body'], 2);
-    $body = preg_replace('/^\h*(?:>[^\r\n]*|On\h+[^\r\n]+\h+wrote:\h*|Am\h+[^\r\n]+\h+schrieb[^\r\n]*:\h*)(?:\R|$)/imu',
-        '', $parts[0]);
-    $body = trim(preg_replace('/(\?link=1)#[a-f0-9]{64}\b/i', '$1', $body));
+    [$body, $quote] = splitQuotedReply($mail['body']);
     if ($body === '') {
         $body = '[Die E-Mail enthält keinen übernommenen Antworttext.]';
     }
     if ($mail['attachments']) {
         $body .= "\n\n[Anhänge liegen in der Antwort-E-Mail im Ticketpostfach.]";
     }
-    return $body;
+    return $quote === '' ? $body : $body . "\n\n" . $quote;
 }

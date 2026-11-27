@@ -202,6 +202,10 @@ function outboxMessage(PDO $db, array $config, array $row): array
         $code = ticketCode($ticket);
         $admin = $row['role'] === 'admin';
         if ($comment !== null) {
+            if ($admin) {
+                [$comment] = splitQuotedReply($comment);
+                $comment = $comment !== '' ? $comment : 'Die E-Mail enthält keinen übernommenen Antworttext.';
+            }
             $subject = 'Kommentar zu Ticket ' . $code;
             $intro = ($admin ? 'Zu Ticket ' . $code . ' ist ein neuer Kundenkommentar eingegangen.'
                 : 'Zu Ihrem Ticket ' . $code . ' gibt es einen neuen Kommentar vom IT-Service:') . "\n\n" . $comment;

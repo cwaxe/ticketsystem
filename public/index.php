@@ -160,7 +160,7 @@ try {
                     !preg_match('/\A.{1,' . MAX_COMMENT_LENGTH . '}\z/su', $comment)) {
                     $notice = 'Bitte geben Sie einen Kommentar mit höchstens ' . MAX_COMMENT_LENGTH . ' Zeichen ein.';
                 } elseif (addPortalComment($db, $id, $user, $comment, $config['admin_email'])) {
-                    go($config, '?' . http_build_query(['id' => $id] + $groupContext) . '#kommentare');
+                    go($config, '?' . http_build_query(['id' => $id] + $groupContext) . '#antwort');
                 } else {
                     $notice = 'Dieses Ticket ist bereits geschlossen.';
                 }
@@ -328,7 +328,7 @@ try {
   <link rel="icon" type="image/png" sizes="150x150" href="favicon-150.png">
   <link rel="icon" type="image/png" sizes="300x300" href="favicon-300.png">
   <link rel="apple-touch-icon" href="favicon-300.png">
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
   <?php if ($showLink): ?><script src="signin.js" defer></script><?php endif ?>
 </head>
 <body>
@@ -437,20 +437,70 @@ try {
     <?php if ($detail && field($_GET, 'saved') === '1'): ?><p class="notice" role="status">Ticket gespeichert.</p><?php endif ?>
     <?php if ($admin && $detail && field($_GET, 'zugeordnet') === '1'): ?><p class="notice" role="status">Kundenzuordnung gespeichert.</p><?php endif ?>
     <?php if ($detail && field($_GET, 'closed') === '1' && $detail['status'] === 'Erledigt'): ?><p class="notice" role="status">Ticket geschlossen.</p><?php endif ?>
-    <article class="panel detail">
-      <h2><?= $detail ? h(ticketCode((int) $detail['id']) . ' · ' . $detail['subject']) : 'Neues Ticket' ?></h2>
-      <?php if ($detail): ?>
-        <p class="meta"><span class="badge"><?= h($detail['status']) ?></span> Eingegangen am <?= h(date('d.m.Y, H:i', (int) $detail['received_at'])) ?> Uhr</p>
-        <?php if ($admin): ?><p>Absender: <?= h($detail['email']) ?></p><?php endif ?>
-        <div class="message"><?= h($detail['body'] !== '' ? $detail['body'] : 'Die E-Mail enthält keinen übernommenen Nachrichtentext.') ?></div>
-        <?php if ($detail['attachment_notice']): ?><p class="meta"><?= $admin ? 'Anhänge liegen in der Original-E-Mail im Ticketpostfach.' : 'Anhänge wurden mit der Original-E-Mail übermittelt.' ?></p><?php endif ?>
+    <?php if ($detail): ?>
+      <header class="panel detail ticket-heading">
+        <div>
+          <p class="meta ticket-reference"><?= h(ticketCode((int) $detail['id'])) ?> · <span class="badge"><?= h($detail['status']) ?></span></p>
+          <h2><?= h($detail['subject']) ?></h2>
+          <?php if ($admin): ?><p class="meta"><?= h($detail['email']) ?></p><?php endif ?>
+        </div>
         <?php if (!$admin && $detail['status'] !== 'Erledigt'): ?>
           <form method="post" action="?id=<?= h($detail['id']) ?>">
             <?= csrfInput() ?><button class="secondary" name="action" value="close">Ticket schließen</button>
           </form>
         <?php endif ?>
+      </header>
+      <section id="kommentare" class="panel detail conversation" aria-labelledby="conversation-title">
+        <h2 id="conversation-title">Konversation</h2>
+        <?php $entries = array_merge([[
+            'role' => 'customer',
+            'created_at' => $detail['received_at'],
+            'body' => $detail['body'] !== '' ? $detail['body'] : 'Die E-Mail enthält keinen übernommenen Nachrichtentext.',
+        ]], $comments); ?>
+        <ol class="conversation-list">
+          <?php foreach ($entries as $position => $entry): ?>
+            <?php
+            $fromService = $entry['role'] === 'admin';
+            [$messageText, $mailQuote] = !$fromService && $position > 0
+                ? splitQuotedReply($entry['body'])
+                : [$entry['body'], ''];
+            $timestamp = (int) $entry['created_at'];
+            ?>
+            <li class="conversation-entry<?= $fromService ? ' conversation-entry-service' : '' ?>">
+              <p class="conversation-byline"><strong><?= $fromService ? 'IT-Service' : 'Kunde' ?></strong>
+                <time datetime="<?= h(date(DATE_ATOM, $timestamp)) ?>"><?= h(date('d.m.Y, H:i', $timestamp)) ?> Uhr</time></p>
+              <div class="conversation-bubble">
+                <div class="conversation-text"><?= h($messageText !== '' ? $messageText : 'Die E-Mail enthält keinen übernommenen Antworttext.') ?></div>
+                <?php if ($position === 0 && $detail['attachment_notice']): ?>
+                  <p class="conversation-attachment"><?= $admin ? 'Anhänge liegen in der Original-E-Mail im Ticketpostfach.' : 'Anhänge wurden mit der Original-E-Mail übermittelt.' ?></p>
+                <?php endif ?>
+                <?php if ($mailQuote !== ''): ?>
+                  <details class="conversation-quote">
+                    <summary>Zitierten E-Mail-Verlauf anzeigen</summary>
+                    <div class="conversation-text"><?= h($mailQuote) ?></div>
+                  </details>
+                <?php endif ?>
+              </div>
+            </li>
+          <?php endforeach ?>
+        </ol>
+        <?php if ($detail['status'] !== 'Erledigt'): ?>
+          <form id="antwort" class="editor conversation-reply" method="post" action="?<?= h(http_build_query(['id' => $detail['id']] + $groupContext)) ?>#antwort">
+            <?= csrfInput() ?>
+            <label>Antwort<textarea name="comment" rows="4" maxlength="<?= MAX_COMMENT_LENGTH ?>" required><?= h(field($_POST, 'comment')) ?></textarea></label>
+            <button name="action" value="comment">Antwort senden</button>
+          </form>
+        <?php endif ?>
+      </section>
+    <?php endif ?>
+    <?php if ($admin): ?>
+      <?php if ($detail): ?>
+        <details class="panel detail ticket-tools"<?= $notice !== '' && in_array($action ?? '', ['assign-customer', 'save', 'delete'], true) ? ' open' : '' ?>>
+          <summary>Ticket bearbeiten</summary>
+      <?php else: ?>
+        <article class="panel detail">
+          <h2>Neues Ticket</h2>
       <?php endif ?>
-      <?php if ($admin): ?>
         <?php if ($detail): ?>
           <section class="customer-assignment" aria-labelledby="customer-assignment-title">
             <h2 id="customer-assignment-title">Kundenzuordnung</h2>
@@ -496,26 +546,11 @@ try {
             </form>
           </details>
         <?php endif ?>
+      <?php if ($detail): ?>
+        </details>
+      <?php else: ?>
+        </article>
       <?php endif ?>
-    </article>
-    <?php if ($detail): ?>
-      <section id="kommentare" class="panel detail comments">
-        <h2>Kommentare</h2>
-        <?php if (!$comments): ?><p class="meta">Noch keine Kommentare.</p><?php endif ?>
-        <?php foreach ($comments as $comment): ?>
-          <article class="ticket-comment">
-            <p class="meta"><strong><?= $comment['role'] === 'admin' ? 'IT-Service' : 'Kunde' ?></strong> · <?= h(date('d.m.Y, H:i', (int) $comment['created_at'])) ?> Uhr</p>
-            <div class="message"><?= h($comment['body']) ?></div>
-          </article>
-        <?php endforeach ?>
-        <?php if ($detail['status'] !== 'Erledigt'): ?>
-          <form class="editor" method="post" action="?id=<?= h($detail['id']) ?>#kommentare">
-            <?= csrfInput() ?>
-            <label>Kommentar für Kunde und IT-Service<textarea name="comment" rows="4" maxlength="<?= MAX_COMMENT_LENGTH ?>" required><?= h(field($_POST, 'comment')) ?></textarea></label>
-            <button name="action" value="comment"><?= $admin ? 'Kommentar hinzufügen und Kunde benachrichtigen' : 'Kommentar hinzufügen' ?></button>
-          </form>
-        <?php endif ?>
-      </section>
     <?php endif ?>
   <?php else: ?>
     <?php if ($admin): ?>

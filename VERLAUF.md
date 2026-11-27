@@ -75,7 +75,13 @@ Der Admin erhält zusätzlich Nachrichten bei Kundenkommentaren aus dem Portal o
 
 Lokal geprüft wurden Datenbankmigration, geschütztes Speichern der Signatur, beide MIME-Fassungen, der klickbare Anmeldelink und die unterschiedlichen Empfänger bei Kundenaktionen.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-HTML-Mails.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-HTML-Mails.zip`.
+
+## 9. Ticketverlauf als Konversation
+
+Die Ticketdetailseite zeigt die erste Anfrage und die Antworten chronologisch als Konversation. Beiträge von Kunde und IT-Service lassen sich an der Position und Kennzeichnung erkennen. Das Antwortfeld schließt sich an die Nachrichten an. Die Verwaltung öffnet die Ticketfelder über **Ticket bearbeiten**.
+
+Typische Zitatblöcke aus E-Mail-Antworten erscheinen eingeklappt, auch bei bereits gespeicherten Beiträgen. Dazu gehören Blöcke mit Absender, Versanddatum, Empfänger und Betreff. Adminbenachrichtigungen zu Kundenantworten enthalten den Antworttext.
 
 ## Installation und Betrieb
 
