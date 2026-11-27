@@ -99,18 +99,24 @@ function createTicket(PDO $db, string $email, string $subject, string $body, arr
         ]);
         $ticket = (int) $db->lastInsertId();
         $prefix = 'T-' . $now->format('Y') . '-';
-        for ($attempt = 0; $attempt < 8; $attempt++) {
-            $number = $prefix . random_int(10000000, 99999999);
-            $assigned = query($db, 'INSERT INTO ticket_numbers (ticket_id, number) VALUES (?, ?)
-                ON CONFLICT(number) DO NOTHING', [$ticket, $number]);
-            if ($assigned->rowCount() > 0) {
-                if ($ownsTransaction) {
-                    $db->commit();
-                }
-                return $ticket;
-            }
+        $used = query($db, 'SELECT CAST(substr(number, -4) AS INTEGER) FROM ticket_numbers
+            WHERE number GLOB ? ORDER BY number', [$prefix . '[0-9][0-9][0-9][0-9]'])->fetchAll(PDO::FETCH_COLUMN);
+        $maxAvailable = 9999 - count($used);
+        if ($maxAvailable < 0) {
+            throw new RuntimeException('Für dieses Jahr sind alle vierstelligen Ticketnummern vergeben.');
         }
-        throw new RuntimeException('Es konnte keine eindeutige Ticketnummer vergeben werden.');
+        $suffix = random_int(0, $maxAvailable);
+        foreach ($used as $taken) {
+            if ($taken > $suffix) {
+                break;
+            }
+            $suffix++;
+        }
+        query($db, 'INSERT INTO ticket_numbers (ticket_id, number) VALUES (?, ?)', [$ticket, $prefix . sprintf('%04d', $suffix)]);
+        if ($ownsTransaction) {
+            $db->commit();
+        }
+        return $ticket;
     } catch (Throwable $error) {
         if ($ownsTransaction) {
             $db->rollBack();

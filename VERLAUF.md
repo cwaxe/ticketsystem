@@ -163,7 +163,13 @@ Die Verwaltung kann erledigte Tickets ins Archiv verschieben, dort suchen und si
 
 Lokal geprüft wurden Datenbankmigration, manuelle Anlage und Import, Nummern in Portal und E-Mails, die Suche nach alten und neuen Nummern sowie Archivieren, Wiederherstellen und Wiederöffnen.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Ticketnummern-und-Archiv.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Ticketnummern-und-Archiv.zip`.
+
+## 19. Vierstellige Zufallsnummer mit Jahreszahl
+
+Für neue Tickets lautet das Format jetzt beispielsweise `T-2026-5837`. Alle bereits vergebenen Nummern bleiben gültig. Die Anwendung wählt zufällig aus den freien vierstelligen Folgen des jeweiligen Jahres.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Vierstellige-Ticketnummern.zip`.
 
 ## Installation und Betrieb
 
