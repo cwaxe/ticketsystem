@@ -80,6 +80,16 @@ try {
         exit('Dieser Bereich ist für die Verwaltung vorgesehen.');
     }
     $id = (int) field($_GET, 'id');
+    $search = trim(substr(field($_GET, 'q'), 0, 250));
+    $filter = field($_GET, 'status');
+    $page = max(1, min(100000, (int) field($_GET, 'seite')));
+    $grouped = $admin && field($_GET, 'gruppe') === 'kunden';
+    $customerParam = field($_GET, 'kunde');
+    $customerFilter = $grouped && preg_match('/\A[0-9]{1,18}\z/', $customerParam) ? (int) $customerParam : null;
+    $customerOverview = $grouped && $customerFilter === null;
+    $filters = array_filter(['q' => $search, 'status' => $filter], static fn (string $value): bool => $value !== '');
+    $listParams = $filters + ($grouped ? ['gruppe' => 'kunden'] : []) + ($customerFilter !== null ? ['kunde' => $customerFilter] : []);
+    $groupContext = $grouped ? $listParams + ($page > 1 ? ['seite' => $page] : []) : [];
     $db = database();
     $notice = '';
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
@@ -150,6 +160,26 @@ try {
                 }
             }
         }
+        if ($action === 'assign-customer') {
+            if (!$admin) {
+                http_response_code(403);
+                exit('Dieser Bereich ist für die Verwaltung vorgesehen.');
+            }
+            $newCustomer = trim(field($_POST, 'new_customer'));
+            $customerChoice = field($_POST, 'customer_id');
+            $customerId = (int) $customerChoice;
+            if ($newCustomer !== '' && (strlen($newCustomer) > MAX_CUSTOMER_NAME_LENGTH * 4 ||
+                !preg_match('/\A.{1,' . MAX_CUSTOMER_NAME_LENGTH . '}\z/u', $newCustomer))) {
+                $notice = 'Bitte geben Sie einen Kundennamen mit höchstens ' . MAX_CUSTOMER_NAME_LENGTH . ' Zeichen ein.';
+            } elseif ($newCustomer === '' && (!preg_match('/\A[0-9]{1,18}\z/', $customerChoice) ||
+                ($customerId > 0 && !query($db, 'SELECT 1 FROM customers WHERE id = ?', [$customerId])->fetchColumn()))) {
+                $notice = 'Bitte wählen Sie einen vorhandenen Kunden aus.';
+            } elseif (assignTicketCustomer($db, $id, (int) field($_POST, 'revision'), $customerId, $newCustomer)) {
+                go($config, '?' . http_build_query(['id' => $id, 'zugeordnet' => 1] + $groupContext));
+            } else {
+                $notice = 'Das Ticket wurde zwischenzeitlich geändert oder gelöscht. Die aktuellen Daten wurden geladen.';
+            }
+        }
         if ($action === 'save' || $action === 'delete') {
             if (!$admin) {
                 http_response_code(403);
@@ -160,7 +190,7 @@ try {
             if ($action === 'delete') {
                 $deleted = query($db, 'DELETE FROM tickets WHERE id = ? AND revision = ?', [$id, $revision]);
                 if ($deleted->rowCount() > 0) {
-                    go($config);
+                    go($config, $groupContext ? '?' . http_build_query($groupContext) : '');
                 }
                 $notice = 'Das Ticket wurde zwischenzeitlich geändert oder gelöscht.';
             } else {
@@ -177,7 +207,7 @@ try {
                     $update = query($db, 'UPDATE tickets SET status = ?, priority = ?, due = ?, notes = ?, revision = revision + 1
                         WHERE id = ? AND revision = ?', [$status, $priority, $due, $notes, $id, $revision]);
                     if ($update->rowCount() > 0) {
-                        go($config, '?id=' . $id . '&saved=1');
+                        go($config, '?' . http_build_query(['id' => $id, 'saved' => 1] + $groupContext));
                     }
                     $notice = 'Das Ticket wurde zwischenzeitlich geändert oder gelöscht. Die aktuellen Daten wurden geladen.';
                 } else {
@@ -203,8 +233,6 @@ try {
     $detail = null;
     $comments = [];
     $rows = [];
-    $search = trim(substr(field($_GET, 'q'), 0, 250));
-    $filter = field($_GET, 'status');
     if ($report) {
         $stats = query($db, "SELECT
             COUNT(CASE WHEN t.status <> 'Erledigt' THEN 1 END) AS open_count,
@@ -219,27 +247,63 @@ try {
         $detail = query($db, 'SELECT * FROM tickets WHERE id = ?' . ($admin ? '' : ' AND email = ?'), $parameters)->fetch();
         if ($detail) {
             $comments = query($db, 'SELECT role, body, created_at FROM ticket_comments WHERE ticket_id = ? ORDER BY id', [$id])->fetchAll();
+            if ($admin) {
+                $assignedCustomer = (int) query($db, 'SELECT customer_id FROM ticket_customers WHERE ticket_id = ?', [$id])->fetchColumn();
+                $customers = query($db, 'SELECT id, name FROM customers ORDER BY name, id')->fetchAll();
+                $domainHint = emailDomain($detail['email']);
+                $suggestions = [];
+                if ($domainHint !== '') {
+                    $db->sqliteCreateFunction('ticket_domain', 'emailDomain', 1);
+                    $suggestions = query($db, 'SELECT DISTINCT c.name FROM customers c
+                        JOIN ticket_customers tc ON tc.customer_id = c.id JOIN tickets t ON t.id = tc.ticket_id
+                        WHERE t.id <> ? AND ticket_domain(t.email) = ? ORDER BY c.name', [$id, $domainHint])->fetchAll(PDO::FETCH_COLUMN);
+                }
+            }
         } else {
             http_response_code(404);
             $notice = 'Dieses Ticket konnte nicht gefunden werden.';
         }
     }
     if ($user && !$report && !$new && !$detail) {
-        $where = $admin ? [] : ['email = ?'];
+        $where = $admin ? [] : ['t.email = ?'];
         $parameters = $admin ? [] : [$user['email']];
         if ($search !== '') {
-            $where[] = "(instr(lower(subject), lower(?)) > 0 OR instr(lower(email), lower(?)) > 0 OR printf('T-%04d', id) = upper(?))";
+            $where[] = "(instr(lower(t.subject), lower(?)) > 0 OR instr(lower(t.email), lower(?)) > 0 OR printf('T-%04d', t.id) = upper(?)" .
+                ($admin ? " OR instr(lower(c.name), lower(?)) > 0" : '') . ')';
             array_push($parameters, $search, $search, $search);
+            if ($admin) {
+                $parameters[] = $search;
+            }
         }
         if (in_array($filter, STATUSES, true)) {
-            $where[] = 'status = ?';
+            $where[] = 't.status = ?';
             $parameters[] = $filter;
         }
-        $page = max(1, min(100000, (int) field($_GET, 'seite')));
+        if ($customerFilter === 0) {
+            $where[] = 'tc.customer_id IS NULL';
+            $customerName = 'Ohne Kundenzuordnung';
+        } elseif ($customerFilter !== null) {
+            $where[] = 'tc.customer_id = ?';
+            $parameters[] = $customerFilter;
+            $customerName = query($db, 'SELECT name FROM customers WHERE id = ?', [$customerFilter])->fetchColumn();
+            if ($customerName === false) {
+                $notice = 'Dieser Kunde konnte nicht gefunden werden.';
+                http_response_code(404);
+            }
+        }
         $offset = ($page - 1) * 50;
-        $rows = query($db, 'SELECT id, subject, email, status, priority, due, received_at FROM tickets' .
-            ($where ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY id DESC LIMIT 51 OFFSET ' . $offset,
-            $parameters)->fetchAll();
+        $selection = ' FROM tickets t';
+        if ($admin) {
+            $selection .= ' LEFT JOIN ticket_customers tc ON tc.ticket_id = t.id LEFT JOIN customers c ON c.id = tc.customer_id';
+        }
+        $selection .= $where ? ' WHERE ' . implode(' AND ', $where) : '';
+        $listing = $customerOverview
+            ? "SELECT COALESCE(tc.customer_id, 0) AS customer_id, c.name AS customer_name, COUNT(*) AS total,
+                COUNT(CASE WHEN t.status <> 'Erledigt' THEN 1 END) AS active, MAX(t.received_at) AS latest" .
+                $selection . ' GROUP BY tc.customer_id, c.name ORDER BY latest DESC, c.name, customer_id'
+            : 'SELECT t.id, t.subject, t.email, t.status, t.priority, t.due, t.received_at' .
+                ($admin ? ', c.name AS customer_name' : '') . $selection . ' ORDER BY t.id DESC';
+        $rows = query($db, $listing . ' LIMIT 51 OFFSET ' . $offset, $parameters)->fetchAll();
     }
 } catch (RuntimeException $error) {
     http_response_code(503);
@@ -253,7 +317,10 @@ try {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Ticketportal · IT-Service Waxenberger</title>
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="icon" type="image/png" sizes="150x150" href="favicon-150.png">
+  <link rel="icon" type="image/png" sizes="300x300" href="favicon-300.png">
+  <link rel="apple-touch-icon" href="favicon-300.png">
+  <link rel="stylesheet" href="style.css?v=5">
   <?php if ($showLink): ?><script src="signin.js" defer></script><?php endif ?>
 </head>
 <body>
@@ -346,8 +413,9 @@ try {
       <?php endif ?>
     </section>
   <?php elseif ($detail || $new): ?>
-    <a class="back" href="./">← Zur Ticketübersicht</a>
+    <a class="back" href="<?= h($groupContext ? '?' . http_build_query($groupContext) : './') ?>">← Zur Ticketübersicht</a>
     <?php if ($detail && field($_GET, 'saved') === '1'): ?><p class="notice" role="status">Ticket gespeichert.</p><?php endif ?>
+    <?php if ($admin && $detail && field($_GET, 'zugeordnet') === '1'): ?><p class="notice" role="status">Kundenzuordnung gespeichert.</p><?php endif ?>
     <?php if ($detail && field($_GET, 'closed') === '1' && $detail['status'] === 'Erledigt'): ?><p class="notice" role="status">Ticket geschlossen.</p><?php endif ?>
     <article class="panel detail">
       <h2><?= $detail ? h(ticketCode((int) $detail['id']) . ' · ' . $detail['subject']) : 'Neues Ticket' ?></h2>
@@ -363,6 +431,27 @@ try {
         <?php endif ?>
       <?php endif ?>
       <?php if ($admin): ?>
+        <?php if ($detail): ?>
+          <section class="customer-assignment" aria-labelledby="customer-assignment-title">
+            <h2 id="customer-assignment-title">Kundenzuordnung</h2>
+            <?php if ($domainHint !== ''): ?>
+              <p class="meta">Domain-Hinweis: @<?= h($domainHint) ?><?= $suggestions ? ' · Passende Kunden aus früheren Zuordnungen: ' . h(implode(', ', $suggestions)) : '' ?></p>
+            <?php endif ?>
+            <form class="editor" method="post">
+              <?= csrfInput() ?><input type="hidden" name="revision" value="<?= h($detail['revision']) ?>">
+              <div class="form-grid">
+                <label>Kunde<select name="customer_id">
+                  <option value="0">Ohne Kundenzuordnung</option>
+                  <?php foreach ($customers as $customer): ?>
+                    <option value="<?= h($customer['id']) ?>"<?= (int) $customer['id'] === $assignedCustomer ? ' selected' : '' ?>><?= h($customer['name']) ?></option>
+                  <?php endforeach ?>
+                </select></label>
+                <label>Oder neuen Kunden anlegen und zuordnen<input name="new_customer" maxlength="<?= MAX_CUSTOMER_NAME_LENGTH ?>" value="<?= h(field($_POST, 'new_customer')) ?>"></label>
+              </div>
+              <button class="secondary" name="action" value="assign-customer">Zuordnung speichern</button>
+            </form>
+          </section>
+        <?php endif ?>
         <form class="editor" method="post">
           <?= csrfInput() ?><input type="hidden" name="id" value="<?= h($detail['id'] ?? 0) ?>"><input type="hidden" name="revision" value="<?= h($detail['revision'] ?? 0) ?>">
           <?php if ($new): ?>
@@ -409,17 +498,44 @@ try {
       </section>
     <?php endif ?>
   <?php else: ?>
+    <?php if ($admin): ?>
+      <nav class="list-views" aria-label="Ansicht der Ticketübersicht">
+        <a class="button<?= $grouped ? ' secondary' : '' ?>" href="?<?= h(http_build_query($filters)) ?>"<?= $grouped ? '' : ' aria-current="page"' ?>>Alle Tickets</a>
+        <a class="button<?= $grouped ? '' : ' secondary' ?>" href="?<?= h(http_build_query($filters + ['gruppe' => 'kunden'])) ?>"<?= $customerOverview ? ' aria-current="page"' : '' ?>>Nach Kunden gruppieren</a>
+      </nav>
+    <?php endif ?>
+    <?php if (!empty($customerName)): ?>
+      <h2><?= $customerFilter === 0 ? h($customerName) : 'Tickets für ' . h($customerName) ?></h2>
+    <?php endif ?>
     <section class="panel listing">
       <form class="filters" method="get">
-        <label>Suche<input type="search" name="q" value="<?= h($search) ?>" placeholder="Betreff oder Ticketnummer"></label>
+        <label>Suche<input type="search" name="q" value="<?= h($search) ?>" placeholder="<?= $admin ? 'Betreff, Kunde, E-Mail oder Ticketnummer' : 'Betreff oder Ticketnummer' ?>"></label>
         <label>Status<select name="status"><option value="">Alle Status</option>
           <?php foreach (STATUSES as $status): ?><option<?= $status === $filter ? ' selected' : '' ?>><?= h($status) ?></option><?php endforeach ?>
         </select></label>
         <button>Filtern</button>
         <?php if ($admin): ?><a class="button secondary" href="?new=1">Neues Ticket</a><?php endif ?>
+        <?php if ($grouped): ?><input type="hidden" name="gruppe" value="kunden"><?php endif ?>
+        <?php if ($customerFilter !== null): ?><input type="hidden" name="kunde" value="<?= h($customerFilter) ?>"><?php endif ?>
       </form>
       <?php if (!$rows): ?>
         <p class="empty">Keine passenden Tickets vorhanden.</p>
+      <?php elseif ($customerOverview): ?>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Kunde</th><th scope="col">Tickets</th><th scope="col">Nicht erledigt</th><th scope="col">Letzter Eingang</th></tr></thead>
+            <tbody>
+              <?php foreach (array_slice($rows, 0, 50) as $row): ?>
+                <tr>
+                  <td><a href="?<?= h(http_build_query($listParams + ['kunde' => $row['customer_id']])) ?>"><?= h($row['customer_name'] ?? 'Ohne Kundenzuordnung') ?></a></td>
+                  <td><?= h($row['total']) ?></td>
+                  <td><?= h($row['active']) ?></td>
+                  <td><?= h(date('d.m.Y', (int) $row['latest'])) ?></td>
+                </tr>
+              <?php endforeach ?>
+            </tbody>
+          </table>
+        </div>
       <?php else: ?>
         <div class="table-wrap">
           <table>
@@ -427,8 +543,10 @@ try {
             <tbody>
             <?php foreach (array_slice($rows, 0, 50) as $row): ?>
               <tr>
-                <td><a href="?id=<?= h($row['id']) ?>"><?= h($row['subject']) ?></a>
-                  <small><?= h(ticketCode((int) $row['id'])) ?><?= $admin ? ' · ' . h($row['email']) : '' ?></small></td>
+                <td><a href="?<?= h(http_build_query(['id' => $row['id']] + $groupContext)) ?>"><?= h($row['subject']) ?></a>
+                  <small><?= h(ticketCode((int) $row['id'])) ?><?= $admin ? ' · ' . h($row['email']) : '' ?></small>
+                  <?php if ($admin && $row['customer_name'] !== null): ?><small><?= h($row['customer_name']) ?></small><?php endif ?>
+                </td>
                 <td><span class="badge"><?= h($row['status']) ?></span></td>
                 <?php if ($admin): ?>
                   <td><?= h($row['priority']) ?></td>
@@ -443,8 +561,8 @@ try {
       <?php endif ?>
       <?php if ($page > 1 || count($rows) > 50): ?>
         <div class="pagination">
-          <?php if ($page > 1): ?><a href="?<?= h(http_build_query(['q' => $search, 'status' => $filter, 'seite' => $page - 1])) ?>">← Zurück</a><?php endif ?>
-          <?php if (count($rows) > 50): ?><a href="?<?= h(http_build_query(['q' => $search, 'status' => $filter, 'seite' => $page + 1])) ?>">Weiter →</a><?php endif ?>
+          <?php if ($page > 1): ?><a href="?<?= h(http_build_query($listParams + ['seite' => $page - 1])) ?>">← Zurück</a><?php endif ?>
+          <?php if (count($rows) > 50): ?><a href="?<?= h(http_build_query($listParams + ['seite' => $page + 1])) ?>">Weiter →</a><?php endif ?>
         </div>
       <?php endif ?>
     </section>

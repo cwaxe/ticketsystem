@@ -56,6 +56,7 @@ button:hover, .button:hover { background: #193e92 }
 .page-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px }
 .back { display: inline-block; margin-bottom: 14px }
 .listing { overflow: hidden }
+.list-views { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px }
 .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 15px; background: var(--pale) }
 .filters label:first-child { flex: 1 1 230px }
 .filters label:nth-child(2) { flex: 0 1 155px }
@@ -79,6 +80,9 @@ td small { display: block; margin-top: 2px }
 .comments { margin-top: 18px }
 .ticket-comment .meta { margin-bottom: 4px }
 .ticket-comment .message { margin: 0 0 14px }
+.customer-assignment { margin: 20px 0; padding: 14px; border: 1px solid var(--line); border-radius: 6px }
+.customer-assignment p { overflow-wrap: anywhere }
+.customer-assignment .editor { margin-top: 12px }
 .report-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 16px 0 }
 .report-stats div { padding: 12px; background: var(--pale); border-radius: 4px }
 .report-stats dt { font-size: 14px }

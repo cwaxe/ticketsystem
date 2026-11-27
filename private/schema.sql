@@ -77,5 +77,15 @@ BEGIN
     DELETE FROM ticket_closures WHERE ticket_id = NEW.id;
 END;
 
-PRAGMA user_version = 1;
+CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE
+);
+CREATE TABLE IF NOT EXISTS ticket_customers (
+    ticket_id INTEGER PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+    customer_id INTEGER NOT NULL REFERENCES customers(id)
+);
+CREATE INDEX IF NOT EXISTS ticket_customers_customer ON ticket_customers(customer_id, ticket_id);
+
+PRAGMA user_version = 2;
 COMMIT;

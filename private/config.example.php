@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 return [
-    'base_url' => 'https://tickets.edv-waxenberger.de/',
+    'base_url' => 'https://ticket.edv-waxenberger.de/',
     'admin_email' => 'HIER-DEINE-ADMIN-ADRESSE',
     'mail_email' => 'ticket@edv-waxenberger.de',
     'secret' => 'HIER-64-HEX-ZEICHEN',

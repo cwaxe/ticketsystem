@@ -6,6 +6,8 @@ const PRIORITIES = ['Niedrig', 'Normal', 'Hoch', 'Dringend'];
 const LINK_SECONDS = 86400;
 const MAX_TICKET_LENGTH = 24000;
 const MAX_COMMENT_LENGTH = 4000;
+const MAX_CUSTOMER_NAME_LENGTH = 120;
+const SCHEMA_VERSION = 2;
 
 function emailAddress(string $address): ?string
 {
@@ -15,6 +17,11 @@ function emailAddress(string $address): ?string
     }
     $at = strrpos($address, '@');
     return substr($address, 0, $at) . strtolower(substr($address, $at));
+}
+
+function emailDomain(string $address): string
+{
+    return strtolower(substr(strrchr($address, '@') ?: '', 1));
 }
 
 function appConfig(): array
@@ -51,7 +58,7 @@ function database(): PDO
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
     $db->exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
-    if ((int) $db->query('PRAGMA user_version')->fetchColumn() === 0) {
+    if ((int) $db->query('PRAGMA user_version')->fetchColumn() < SCHEMA_VERSION) {
         $db->exec(file_get_contents(__DIR__ . '/schema.sql'));
     }
     return $db;
@@ -67,6 +74,33 @@ function query(PDO $db, string $sql, array $parameters = []): PDOStatement
 function ticketCode(int $id): string
 {
     return 'T-' . str_pad((string) $id, 4, '0', STR_PAD_LEFT);
+}
+
+function assignTicketCustomer(PDO $db, int $ticket, int $revision, int $customer, string $name): bool
+{
+    $db->beginTransaction();
+    try {
+        $updated = query($db, 'UPDATE tickets SET revision = revision + 1 WHERE id = ? AND revision = ?', [$ticket, $revision]);
+        if ($updated->rowCount() === 0) {
+            $db->rollBack();
+            return false;
+        }
+        if ($name !== '') {
+            query($db, 'INSERT INTO customers (name) VALUES (?) ON CONFLICT(name) DO NOTHING', [$name]);
+            $customer = (int) query($db, 'SELECT id FROM customers WHERE name = ?', [$name])->fetchColumn();
+        }
+        if ($customer === 0) {
+            query($db, 'DELETE FROM ticket_customers WHERE ticket_id = ?', [$ticket]);
+        } else {
+            query($db, 'INSERT INTO ticket_customers (ticket_id, customer_id) VALUES (?, ?)
+                ON CONFLICT(ticket_id) DO UPDATE SET customer_id = excluded.customer_id', [$ticket, $customer]);
+        }
+        $db->commit();
+        return true;
+    } catch (Throwable $error) {
+        $db->rollBack();
+        throw $error;
+    }
 }
 
 function queueMail(PDO $db, string $email, string $role, ?int $ticket = null): void
