@@ -112,5 +112,10 @@ BEGIN
     VALUES (last_insert_rowid(), OLD.status, NEW.status);
 END;
 
-PRAGMA user_version = 4;
+CREATE TABLE IF NOT EXISTS mail_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    signature TEXT NOT NULL
+);
+
+PRAGMA user_version = 5;
 COMMIT;

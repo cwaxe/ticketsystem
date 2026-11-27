@@ -12,6 +12,56 @@ function smtpMessageId(array $config, int|string $id): string
     return '<' . $digest . '@' . $domain . '>';
 }
 
+function encodeMailPart(string $content): string
+{
+    return quoted_printable_encode(preg_replace("/\r\n|\r|\n/", "\r\n", $content));
+}
+
+function renderHtmlMail(string $baseUrl, string $subject, string $body, string $signature): string
+{
+    $escape = static fn (string $text): string => htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    $body = preg_replace("/\r\n|\r/", "\n", $body);
+    $paragraphs = preg_split('/\n{2,}/', $body, -1, PREG_SPLIT_NO_EMPTY);
+    $sections = '';
+    foreach ($paragraphs as $paragraph) {
+        $lines = explode("\n", $paragraph);
+        $content = [];
+        foreach ($lines as $line) {
+            $safe = $escape($line);
+            if (str_starts_with($line, $baseUrl) && preg_match('~\Ahttps://[^\s<>"\']+\z~u', $line)) {
+                $label = str_starts_with($line, $baseUrl . '?link=1#') ? 'Anmeldelink öffnen' : 'Ticketportal öffnen';
+                $safe = '<a href="' . $safe . '" style="display:inline-block;margin-top:8px;padding:10px 16px;'
+                    . 'border-radius:5px;background:#0d3082;color:#ffffff;font-weight:bold;text-decoration:underline">'
+                    . $label . '</a>';
+            }
+            $content[] = $safe;
+        }
+        $sections .= '<p style="margin:0 0 16px">' . implode('<br>', $content) . '</p>';
+    }
+    $heading = $escape($subject);
+    $footer = $signature === '' ? '' : '<div style="border-top:1px solid #d3def3;padding-top:16px;margin-top:24px;color:#294475">'
+        . nl2br($escape($signature), false) . '</div>';
+    return <<<HTML
+<!doctype html>
+<html lang="de">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{$heading}</title></head>
+<body style="margin:0;background:#f4f7fc;color:#18284b">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f7fc">
+  <tr><td align="center" style="padding:24px 12px">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;font-family:Arial,sans-serif">
+      <tr><td style="padding:18px 24px;background:#0d3082;color:#ffffff;font-size:16px;font-weight:bold">Ticketportal</td></tr>
+      <tr><td style="padding:24px;font-size:16px;line-height:1.55">
+        <h1 style="margin:0 0 20px;font-size:22px;line-height:1.3;color:#0d3082">{$heading}</h1>
+        {$sections}{$footer}
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>
+HTML;
+}
+
 function smtpSend(array $config, string $address, string $subject, string $body, int|string $id): void
 {
     $host = $config['smtp_host'];
@@ -26,10 +76,14 @@ function smtpSend(array $config, string $address, string $subject, string $body,
     }
     $scheme = $mode === 'implicit' ? 'smtps' : 'smtp';
     $sender = $config['mail_email'];
+    $boundary = 'ticket_' . bin2hex(random_bytes(16));
+    $signature = $config['mail_signature'] ?? DEFAULT_MAIL_SIGNATURE;
+    $body = trim($body);
+    $html = renderHtmlMail($config['base_url'], $subject, $body, $signature);
+    $plain = $signature === '' ? $body : $body . "\n\n" . $signature;
     if (preg_match('/[^\x20-\x7e]/', $subject)) {
         $subject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
     }
-    $body = preg_replace("/\r\n|\r|\n/", "\r\n", $body);
     $message = implode("\r\n", [
         'Date: ' . gmdate('D, d M Y H:i:s') . ' +0000',
         'From: IT-Service Waxenberger <' . $sender . '>',
@@ -39,10 +93,19 @@ function smtpSend(array $config, string $address, string $subject, string $body,
         'Auto-Submitted: auto-generated',
         'X-Auto-Response-Suppress: All',
         'MIME-Version: 1.0',
+        'Content-Type: multipart/alternative; boundary="' . $boundary . '"',
+        '',
+        '--' . $boundary,
         'Content-Type: text/plain; charset=UTF-8',
         'Content-Transfer-Encoding: quoted-printable',
         '',
-        quoted_printable_encode($body),
+        encodeMailPart($plain),
+        '--' . $boundary,
+        'Content-Type: text/html; charset=UTF-8',
+        'Content-Transfer-Encoding: quoted-printable',
+        '',
+        encodeMailPart($html),
+        '--' . $boundary . '--',
         '',
     ]);
     $stream = fopen('php://temp', 'w+b');
@@ -90,6 +153,7 @@ function smtpSend(array $config, string $address, string $subject, string $body,
 function deliverOutbox(PDO $db, array $config, ?callable $send = null): array
 {
     $send ??= 'smtpSend';
+    $config['mail_signature'] = mailSignature($db);
     $now = time();
     query($db, 'DELETE FROM links WHERE expires_at <= ?', [$now]);
     query($db, 'DELETE FROM rate_limits WHERE expires_at <= ?', [$now]);
@@ -136,17 +200,21 @@ function outboxMessage(PDO $db, array $config, array $row): array
     if ($comment !== null || $newStatus !== null) {
         $ticket = (int) $row['ticket_id'];
         $code = ticketCode($ticket);
+        $admin = $row['role'] === 'admin';
         if ($comment !== null) {
             $subject = 'Kommentar zu Ticket ' . $code;
-            $intro = "Zu Ihrem Ticket " . $code . " gibt es einen neuen Kommentar vom IT-Service:\n\n" . $comment;
+            $intro = ($admin ? 'Zu Ticket ' . $code . ' ist ein neuer Kundenkommentar eingegangen.'
+                : 'Zu Ihrem Ticket ' . $code . ' gibt es einen neuen Kommentar vom IT-Service:') . "\n\n" . $comment;
         } else {
             $subject = 'Statusänderung zu Ticket ' . $code;
-            $intro = 'Der Status Ihres Tickets ' . $code . ' wurde von „' . $row['old_status'] . '“ auf „' . $newStatus . '“ geändert.';
+            $change = 'von „' . $row['old_status'] . '“ auf „' . $newStatus . '“';
+            $intro = $admin ? 'Der Kunde hat Ticket ' . $code . ' geschlossen. Der Status wechselte ' . $change . '.'
+                : 'Der Status Ihres Tickets ' . $code . ' wurde ' . $change . ' geändert.';
         }
+        $reply = $admin ? '' : "\n\nSie können direkt auf diese E-Mail antworten. Ihre Antwort wird dem Ticket zugeordnet.";
         return [
             $subject,
-            "Guten Tag,\n\n" . $intro . "\n\nSie können direkt auf diese E-Mail antworten. Ihre Antwort wird dem Ticket zugeordnet.\n\n"
-                . "Zum Ticketportal:\n" . $config['base_url'] . '?id=' . $ticket . "\n\nIT-Service Waxenberger",
+            "Guten Tag,\n\n" . $intro . $reply . "\n\nZum Ticketportal:\n" . $config['base_url'] . '?id=' . $ticket,
         ];
     }
     if ($row['role'] === 'admin' && $row['ticket_id'] !== null) {
@@ -154,7 +222,7 @@ function outboxMessage(PDO $db, array $config, array $row): array
         return [
             'Neues Ticket ' . $code,
             "Guten Tag,\n\nIm Ticketportal wurde das Ticket " . $code . " erfasst.\n\n"
-                . "Zur Ticketverwaltung:\n" . $config['base_url'] . "?admin=1\n\nIT-Service Waxenberger",
+                . "Zur Ticketverwaltung:\n" . $config['base_url'] . '?admin=1',
         ];
     }
 
@@ -180,7 +248,7 @@ function outboxMessage(PDO $db, array $config, array $row): array
     }
     $body = "Guten Tag,\n\n" . $intro . "\n\nÜber diesen persönlichen Link gelangen Sie zu Ihrem Ticketportal:\n\n"
         . $url . "\n\nDer Link ist einmal verwendbar und läuft nach spätestens 24 Stunden ab. "
-        . "Auf der Startseite des Portals können Sie jederzeit einen neuen Link anfordern.\n\nIT-Service Waxenberger";
+        . "Auf der Startseite des Portals können Sie jederzeit einen neuen Link anfordern.";
     return [$subject, $body];
 }
 

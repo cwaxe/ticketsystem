@@ -7,7 +7,9 @@ const LINK_SECONDS = 86400;
 const MAX_TICKET_LENGTH = 24000;
 const MAX_COMMENT_LENGTH = 4000;
 const MAX_CUSTOMER_NAME_LENGTH = 120;
-const SCHEMA_VERSION = 4;
+const MAX_MAIL_SIGNATURE_LENGTH = 2000;
+const DEFAULT_MAIL_SIGNATURE = 'IT-Service Waxenberger';
+const SCHEMA_VERSION = 5;
 
 function emailAddress(string $address): ?string
 {
@@ -71,6 +73,12 @@ function query(PDO $db, string $sql, array $parameters = []): PDOStatement
     return $statement;
 }
 
+function mailSignature(PDO $db): string
+{
+    $signature = query($db, 'SELECT signature FROM mail_settings WHERE id = 1')->fetchColumn();
+    return $signature === false ? DEFAULT_MAIL_SIGNATURE : $signature;
+}
+
 function ticketCode(int $id): string
 {
     return 'T-' . str_pad((string) $id, 4, '0', STR_PAD_LEFT);
@@ -111,7 +119,13 @@ function queueMail(PDO $db, string $email, string $role, ?int $ticket = null): i
     return (int) $db->lastInsertId();
 }
 
-function addPortalComment(PDO $db, int $ticket, array $user, string $body): bool
+function queueCommentNotification(PDO $db, int $ticket, int $comment, string $recipient, string $role): void
+{
+    $outboxId = queueMail($db, $recipient, $role, $ticket);
+    query($db, 'INSERT INTO comment_notifications (outbox_id, comment_id) VALUES (?, ?)', [$outboxId, $comment]);
+}
+
+function addPortalComment(PDO $db, int $ticket, array $user, string $body, string $adminEmail): bool
 {
     $admin = $user['role'] === 'admin';
     $params = [$user['role'], $body, time(), $ticket];
@@ -123,13 +137,32 @@ function addPortalComment(PDO $db, int $ticket, array $user, string $body): bool
         $comment = query($db, "INSERT INTO ticket_comments (ticket_id, role, body, created_at)
             SELECT id, ?, ?, ? FROM tickets WHERE id = ? AND status <> 'Erledigt'" .
             ($admin ? '' : ' AND email = ?') . ' RETURNING id', $params)->fetchColumn();
-        if ($comment !== false && $admin) {
-            $recipient = query($db, 'SELECT email FROM tickets WHERE id = ?', [$ticket])->fetchColumn();
-            $outboxId = queueMail($db, $recipient, 'customer', $ticket);
-            query($db, 'INSERT INTO comment_notifications (outbox_id, comment_id) VALUES (?, ?)', [$outboxId, $comment]);
+        if ($comment !== false) {
+            $recipient = $admin ? query($db, 'SELECT email FROM tickets WHERE id = ?', [$ticket])->fetchColumn() : $adminEmail;
+            queueCommentNotification($db, $ticket, (int) $comment, $recipient, $admin ? 'customer' : 'admin');
         }
         $db->commit();
         return $comment !== false;
+    } catch (Throwable $error) {
+        $db->rollBack();
+        throw $error;
+    }
+}
+
+function closeCustomerTicket(PDO $db, int $ticket, string $owner, string $adminEmail): bool
+{
+    $db->beginTransaction();
+    try {
+        $priorStatus = query($db, "UPDATE tickets SET revision = revision + 1
+            WHERE id = ? AND email = ? AND status <> 'Erledigt' RETURNING status", [$ticket, $owner])->fetchColumn();
+        if ($priorStatus !== false) {
+            query($db, "UPDATE tickets SET status = 'Erledigt' WHERE id = ?", [$ticket]);
+            $outboxId = queueMail($db, $adminEmail, 'admin', $ticket);
+            query($db, "INSERT INTO status_notifications (outbox_id, old_status, new_status) VALUES (?, ?, 'Erledigt')",
+                [$outboxId, $priorStatus]);
+        }
+        $db->commit();
+        return $priorStatus !== false;
     } catch (Throwable $error) {
         $db->rollBack();
         throw $error;
@@ -171,6 +204,7 @@ function storeImportedMessage(PDO $db, ?array $mail, string $mailbox, string $va
                 if ($ticket !== null) {
                     query($db, "INSERT INTO ticket_comments (ticket_id, role, body, created_at) VALUES (?, 'customer', ?, ?)",
                         [$ticket, replyComment($mail), time()]);
+                    queueCommentNotification($db, $ticket, (int) $db->lastInsertId(), $adminEmail, 'admin');
                 } else {
                     query($db, 'INSERT INTO tickets (email, subject, body, attachment_notice, received_at) VALUES (?, ?, ?, ?, ?)',
                         [$mail['email'], $mail['subject'], $mail['body'], $mail['attachments'], time()]);

@@ -75,7 +75,8 @@ try {
     }
     $admin = ($user['role'] ?? '') === 'admin';
     $report = field($_GET, 'auswertung') === '1';
-    if ($report && !$admin) {
+    $signatureSettings = field($_GET, 'signatur') === '1';
+    if (($report || $signatureSettings) && !$admin) {
         http_response_code(403);
         exit('Dieser Bereich ist für die Verwaltung vorgesehen.');
     }
@@ -128,15 +129,28 @@ try {
             $_SESSION['csrf'] = bin2hex(random_bytes(32));
             go($config);
         }
+        if ($action === 'save-signature') {
+            if (!$signatureSettings) {
+                http_response_code(403);
+                exit('Dieser Bereich ist für die Verwaltung vorgesehen.');
+            }
+            $signature = trim(preg_replace("/\r\n|\r/", "\n", field($_POST, 'signature')));
+            if (strlen($signature) > MAX_MAIL_SIGNATURE_LENGTH * 4 ||
+                !preg_match('/\A[^\x00]{0,' . MAX_MAIL_SIGNATURE_LENGTH . '}\z/u', $signature)) {
+                $notice = 'Bitte geben Sie eine Signatur mit höchstens ' . MAX_MAIL_SIGNATURE_LENGTH . ' Zeichen ein.';
+            } else {
+                query($db, 'INSERT INTO mail_settings (id, signature) VALUES (1, ?)
+                    ON CONFLICT(id) DO UPDATE SET signature = excluded.signature', [$signature]);
+                go($config, '?signatur=1&saved=1');
+            }
+        }
         if ($action === 'comment' || $action === 'close') {
             if (!$user || ($action === 'close' && $admin)) {
                 http_response_code(403);
                 exit('Diese Aktion ist für Ihr Konto nicht verfügbar.');
             }
             if ($action === 'close') {
-                $closed = query($db, "UPDATE tickets SET status = 'Erledigt', revision = revision + 1
-                    WHERE id = ? AND email = ? AND status <> 'Erledigt'", [$id, $user['email']]);
-                if ($closed->rowCount() > 0) {
+                if (closeCustomerTicket($db, $id, $user['email'], $config['admin_email'])) {
                     go($config, '?id=' . $id . '&closed=1');
                 }
                 $notice = 'Dieses Ticket ist bereits geschlossen.';
@@ -145,7 +159,7 @@ try {
                 if (strlen($comment) > MAX_COMMENT_LENGTH * 4 ||
                     !preg_match('/\A.{1,' . MAX_COMMENT_LENGTH . '}\z/su', $comment)) {
                     $notice = 'Bitte geben Sie einen Kommentar mit höchstens ' . MAX_COMMENT_LENGTH . ' Zeichen ein.';
-                } elseif (addPortalComment($db, $id, $user, $comment)) {
+                } elseif (addPortalComment($db, $id, $user, $comment, $config['admin_email'])) {
                     go($config, '?' . http_build_query(['id' => $id] + $groupContext) . '#kommentare');
                 } else {
                     $notice = 'Dieses Ticket ist bereits geschlossen.';
@@ -225,7 +239,9 @@ try {
     $detail = null;
     $comments = [];
     $rows = [];
-    if ($report) {
+    if ($signatureSettings) {
+        $signature = ($action ?? '') === 'save-signature' ? field($_POST, 'signature') : mailSignature($db);
+    } elseif ($report) {
         $stats = query($db, "SELECT
             COUNT(CASE WHEN t.status <> 'Erledigt' THEN 1 END) AS open_count,
             COUNT(c.ticket_id) AS measured_count,
@@ -256,7 +272,7 @@ try {
             $notice = 'Dieses Ticket konnte nicht gefunden werden.';
         }
     }
-    if ($user && !$report && !$new && !$detail) {
+    if ($user && !$report && !$signatureSettings && !$new && !$detail) {
         $where = $admin ? [] : ['t.email = ?'];
         $parameters = $admin ? [] : [$user['email']];
         if ($search !== '') {
@@ -369,13 +385,25 @@ try {
   <?php endif ?>
 <?php else: ?>
   <div class="page-title">
-    <h1><?= $report ? 'Bearbeitungszeiten' : ($admin ? 'Ticketverwaltung' : 'Meine Tickets') ?></h1>
+    <h1><?= $signatureSettings ? 'E-Mail-Signatur' : ($report ? 'Bearbeitungszeiten' : ($admin ? 'Ticketverwaltung' : 'Meine Tickets')) ?></h1>
     <div class="page-actions">
       <?php if ($admin && !$report): ?><a class="button secondary" href="?auswertung=1">Bearbeitungszeiten</a><?php endif ?>
+      <?php if ($admin && !$signatureSettings): ?><a class="button secondary" href="?signatur=1">E-Mail-Signatur</a><?php endif ?>
       <form method="post" action="./"><?= csrfInput() ?><input type="hidden" name="action" value="logout"><button class="secondary">Abmelden</button></form>
     </div>
   </div>
-  <?php if ($report): ?>
+  <?php if ($signatureSettings): ?>
+    <a class="back" href="./">← Zur Ticketübersicht</a>
+    <?php if (field($_GET, 'saved') === '1'): ?><p class="notice" role="status">Signatur gespeichert.</p><?php endif ?>
+    <section class="panel detail">
+      <form class="editor" method="post" action="?signatur=1">
+        <?= csrfInput() ?>
+        <label>Signaturtext<textarea name="signature" rows="7" maxlength="<?= MAX_MAIL_SIGNATURE_LENGTH ?>" aria-describedby="signature-help"><?= h($signature) ?></textarea></label>
+        <p id="signature-help" class="meta">Die Signatur erscheint in der HTML- und der Textfassung der E-Mails. Mit einem leeren Feld versendest du E-Mails ohne Signatur.</p>
+        <button name="action" value="save-signature">Signatur speichern</button>
+      </form>
+    </section>
+  <?php elseif ($report): ?>
     <a class="back" href="./">← Zur Ticketübersicht</a>
     <section class="panel detail">
       <h2>Vom Ticketeingang bis zum Schließen</h2>

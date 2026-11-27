@@ -93,9 +93,10 @@ function printMailStatus(PDO $db): void
         (SELECT COUNT(*) FROM imported_mail) AS imported,
         COUNT(*) AS queued,
         COUNT(CASE WHEN role = \'customer\' AND ticket_id IS NOT NULL AND n.outbox_id IS NULL AND s.outbox_id IS NULL THEN 1 END) AS confirmations,
-        COUNT(n.outbox_id) AS comment_notifications,
-        COUNT(s.outbox_id) AS status_notifications,
-        COUNT(CASE WHEN role = \'admin\' AND ticket_id IS NOT NULL THEN 1 END) AS admin_alerts,
+        COUNT(CASE WHEN role = \'customer\' THEN n.outbox_id END) AS comment_notifications,
+        COUNT(CASE WHEN role = \'customer\' THEN s.outbox_id END) AS status_notifications,
+        COUNT(CASE WHEN role = \'admin\' AND ticket_id IS NOT NULL AND n.outbox_id IS NULL AND s.outbox_id IS NULL THEN 1 END) AS admin_alerts,
+        COUNT(CASE WHEN role = \'admin\' AND (n.outbox_id IS NOT NULL OR s.outbox_id IS NOT NULL) THEN 1 END) AS admin_updates,
         COUNT(CASE WHEN role = \'admin\' AND ticket_id IS NULL THEN 1 END) AS admin_links,
         COUNT(CASE WHEN attempts > 0 THEN 1 END) AS retries,
         COUNT(CASE WHEN next_attempt <= ? THEN 1 END) AS ready
@@ -105,6 +106,7 @@ function printMailStatus(PDO $db): void
     echo 'Importierte E-Mails: ' . $stats['imported'] . PHP_EOL;
     echo 'E-Mails in der Warteschlange: ' . $stats['queued'] . ' (davon Eingangsbestätigungen: ' . $stats['confirmations'] . ')' . PHP_EOL;
     echo 'Davon Adminbenachrichtigungen: ' . $stats['admin_alerts'] . PHP_EOL;
+    echo 'Davon Adminbenachrichtigungen zu Kundenaktionen: ' . $stats['admin_updates'] . PHP_EOL;
     echo 'Davon Kundenbenachrichtigungen zu Kommentaren: ' . $stats['comment_notifications'] . PHP_EOL;
     echo 'Davon Kundenbenachrichtigungen zu Statusänderungen: ' . $stats['status_notifications'] . PHP_EOL;
     echo 'Davon Admin-Anmeldelinks: ' . $stats['admin_links'] . PHP_EOL;
@@ -125,6 +127,9 @@ try {
     if ($mode === '--test-mail') {
         if (!extension_loaded('curl')) {
             throw new RuntimeException('Bitte cURL für PHP-CLI aktivieren.');
+        }
+        if (extension_loaded('pdo_sqlite') && is_file(__DIR__ . '/data/tickets.sqlite3')) {
+            $config['mail_signature'] = mailSignature(database());
         }
         $id = 'test:' . bin2hex(random_bytes(16));
         $started = new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin'));

@@ -65,7 +65,17 @@ Bei einem tatsächlichen Wechsel erhält der Kunde eine E-Mail mit Ticketnummer,
 
 Die Statusmail verwendet dieselbe Warteschlange und Nachrichtenreferenz wie Kommentarbenachrichtigungen. Antworten von der ursprünglichen Absenderadresse landen als Kommentar im selben Ticket. Der lokale Test deckte die Migration, die Statuswechsel in beiden Portalrollen, den SMTP-Versand und den Rückimport über IMAP ab.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Statusmeldungen.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Statusmeldungen.zip`.
+
+## 8. HTML-Mails, anpassbare Signatur und Adminbenachrichtigungen
+
+Automatische E-Mails werden mit einer gestalteten HTML-Fassung und einer Textfassung verschickt. Links zum Portal und persönliche Anmeldelinks erscheinen im HTML als Schaltflächen. Im Adminbereich **E-Mail-Signatur** lässt sich der mehrzeilige Signaturtext für beide Fassungen pflegen. Die Signatur wird in der vorhandenen SQLite-Datenbank gespeichert.
+
+Der Admin erhält zusätzlich Nachrichten bei Kundenkommentaren aus dem Portal oder per E-Mail und beim Schließen eines Tickets durch den Kunden. Der Versand läuft weiter über die gemeinsame Warteschlange.
+
+Lokal geprüft wurden Datenbankmigration, geschütztes Speichern der Signatur, beide MIME-Fassungen, der klickbare Anmeldelink und die unterschiedlichen Empfänger bei Kundenaktionen.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-HTML-Mails.zip`.
 
 ## Installation und Betrieb
 

@@ -47,6 +47,7 @@ try {
     $id = (int) $db->lastInsertId();
     $row = query($db, 'SELECT * FROM outbox WHERE id = ?', [$id])->fetch();
     [$subject, $body] = outboxMessage($db, $config, $row);
+    $config['mail_signature'] = mailSignature($db);
     $started = new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin'));
     echo 'Versandbeginn: ' . $started->format('d.m.Y H:i:s T (P)') . PHP_EOL;
     echo 'Absender: ' . $config['mail_email'] . PHP_EOL;
