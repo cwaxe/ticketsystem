@@ -43,3 +43,12 @@ Im CCP **Produkte → Lupe beim Webhosting → Plesk Panel-Links → Geplante Au
 Alternativ die ersten drei Schritte per SSH mit demselben PHP-CLI ausführen, sofern verfügbar. Die Administration läuft über das Webportal, der Mailabruf und Versand über die PHP-Aufgabe.
 
 [Geplante Aufgaben bei netcup](https://www.netcup.com/de/helpcenter/dokumentation/webhosting/cron-jobs)
+
+
+## 4. Anhänge und Datensicherung im Webportal
+
+Die Verwaltung zeigt unter **Datensicherung** den ZIP-Download und die Wiederherstellung an. Für diese Ansichten muss `zip` in der **Web-PHP-Version der Subdomain** verfügbar sein. Prüfe dies bei Bedarf auf der im WCP verlinkten PHP-Infoseite.
+
+Für die vollständigen Portal-Uploadlimits müssen `upload_max_filesize` mindestens 8 MiB, `max_file_uploads` mindestens 10 und `post_max_size` mehr als 16 MiB erlauben. Für die Wiederherstellung einer größeren Sicherung müssen `upload_max_filesize`, `post_max_size` und das HTTP-Anfragelimit die jeweilige ZIP-Größe einschließlich Formular-Overhead erlauben. Der private Datenordner braucht Platz für temporäre Dateien und ein Transaktionsjournal. Die Anwendung erlaubt SQLite-Sicherungen bis 512 MiB.
+
+Bei einem Update Konfiguration und bisherigen Datenordner behalten. Die Migration auf das neue Schema erfolgt beim ersten regulären Portal- oder Worker-Aufruf. Für die bestehende geplante Aufgabe ist keine Neuinitialisierung des Postfachs nötig.

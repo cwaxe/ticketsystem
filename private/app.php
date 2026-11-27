@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 
-const STATUSES = ['Offen', 'In Arbeit', 'Wartet', 'Erledigt'];
+require_once __DIR__ . '/attachments.php';
+
+const STATUSES = ['Offen', 'Wieder geöffnet', 'In Arbeit', 'Wartet', 'Erledigt'];
 const PRIORITIES = ['Niedrig', 'Normal', 'Hoch', 'Dringend'];
 const LINK_SECONDS = 86400;
 const MAX_TICKET_LENGTH = 24000;
@@ -9,7 +11,7 @@ const MAX_COMMENT_LENGTH = 4000;
 const MAX_CUSTOMER_NAME_LENGTH = 120;
 const MAX_MAIL_SIGNATURE_LENGTH = 2000;
 const DEFAULT_MAIL_SIGNATURE = 'IT-Service Waxenberger';
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 function emailAddress(string $address): ?string
 {
@@ -113,6 +115,7 @@ function createTicket(PDO $db, string $email, string $subject, string $body, arr
             $suffix++;
         }
         query($db, 'INSERT INTO ticket_numbers (ticket_id, number) VALUES (?, ?)', [$ticket, $prefix . sprintf('%04d', $suffix)]);
+        storeAttachments($db, $ticket, null, $options['files'] ?? []);
         if ($ownsTransaction) {
             $db->commit();
         }
@@ -169,7 +172,7 @@ function queueCommentNotification(PDO $db, int $ticket, int $comment, string $re
     query($db, 'INSERT INTO comment_notifications (outbox_id, comment_id) VALUES (?, ?)', [$outboxId, $comment]);
 }
 
-function addPortalComment(PDO $db, int $ticket, array $user, string $body, string $adminEmail): bool
+function addPortalComment(PDO $db, int $ticket, array $user, string $body, string $adminEmail, array $files = []): bool
 {
     $admin = $user['role'] === 'admin';
     $params = [$user['role'], $body, time(), $ticket];
@@ -182,6 +185,7 @@ function addPortalComment(PDO $db, int $ticket, array $user, string $body, strin
             SELECT id, ?, ?, ? FROM tickets WHERE id = ? AND status <> 'Erledigt'" .
             ($admin ? '' : ' AND email = ?') . ' RETURNING id', $params)->fetchColumn();
         if ($comment !== false) {
+            storeAttachments($db, $ticket, (int) $comment, $files);
             $recipient = $admin ? query($db, 'SELECT email FROM tickets WHERE id = ?', [$ticket])->fetchColumn() : $adminEmail;
             queueCommentNotification($db, $ticket, (int) $comment, $recipient, $admin ? 'customer' : 'admin');
         }
@@ -207,16 +211,7 @@ function saveAdminTicket(PDO $db, int $ticket, int $revision, array $fields, str
             return $current ? 'status-unchanged' : 'stale';
         }
         if ($comment !== '') {
-            // The status trigger queues the customer mail within this transaction.
-            $notice = query($db, "SELECT o.id, o.created_at FROM outbox o JOIN status_notifications s ON s.outbox_id = o.id
-                WHERE o.ticket_id = ? AND o.role = 'customer' ORDER BY o.id DESC LIMIT 1", [$ticket])->fetch();
-            if (!$notice) {
-                throw new RuntimeException('Die Statusbenachrichtigung konnte nicht eingereiht werden.');
-            }
-            query($db, "INSERT INTO ticket_comments (ticket_id, role, body, created_at) VALUES (?, 'admin', ?, ?)",
-                [$ticket, $comment, $notice['created_at']]);
-            $commentId = (int) $db->lastInsertId();
-            query($db, 'INSERT INTO comment_notifications (outbox_id, comment_id) VALUES (?, ?)', [$notice['id'], $commentId]);
+            recordStatusComment($db, $ticket, 'admin', $comment);
         }
         $db->commit();
         return 'saved';
@@ -226,19 +221,55 @@ function saveAdminTicket(PDO $db, int $ticket, int $revision, array $fields, str
     }
 }
 
+function recordStatusComment(PDO $db, int $ticket, string $role, string $body, array $files = []): int
+{
+    // The trigger queues the customer mail within the status change transaction.
+    $notice = query($db, "SELECT o.id, o.created_at FROM outbox o JOIN status_notifications s ON s.outbox_id = o.id
+        WHERE o.ticket_id = ? AND o.role = 'customer' ORDER BY o.id DESC LIMIT 1", [$ticket])->fetch();
+    if (!$notice) {
+        throw new RuntimeException('Die Statusbenachrichtigung konnte nicht eingereiht werden.');
+    }
+    query($db, 'INSERT INTO ticket_comments (ticket_id, role, body, created_at) VALUES (?, ?, ?, ?)',
+        [$ticket, $role, $body, $notice['created_at']]);
+    $comment = (int) $db->lastInsertId();
+    query($db, 'UPDATE ticket_activity SET status_id = (
+        SELECT MAX(id) FROM ticket_status_history WHERE ticket_id = ?) WHERE comment_id = ?', [$ticket, $comment]);
+    storeAttachments($db, $ticket, $comment, $files);
+    query($db, 'INSERT INTO comment_notifications (outbox_id, comment_id) VALUES (?, ?)', [$notice['id'], $comment]);
+    return $comment;
+}
+
 function closeCustomerTicket(PDO $db, int $ticket, string $owner, string $adminEmail): bool
+{
+    return changeCustomerStatus($db, $ticket, $owner, $adminEmail, 'Erledigt', '', []);
+}
+
+function reopenCustomerTicket(PDO $db, int $ticket, string $owner, string $adminEmail, string $reason, array $files = []): bool
+{
+    if (!preg_match('/\S/u', $reason)) {
+        throw new InvalidArgumentException('Bitte geben Sie einen Grund für das Wiederöffnen an.');
+    }
+    return changeCustomerStatus($db, $ticket, $owner, $adminEmail, 'Wieder geöffnet', $reason, $files);
+}
+
+function changeCustomerStatus(PDO $db, int $ticket, string $owner, string $adminEmail, string $status, string $reason, array $files): bool
 {
     $db->beginTransaction();
     try {
-        $priorStatus = query($db, "UPDATE tickets SET revision = revision + 1
-            WHERE id = ? AND email = ? AND status <> 'Erledigt' RETURNING status", [$ticket, $owner])->fetchColumn();
+        $condition = $status === 'Erledigt' ? "status <> 'Erledigt'" : "status = 'Erledigt'";
+        $priorStatus = query($db, 'UPDATE tickets SET revision = revision + 1
+            WHERE id = ? AND email = ? AND ' . $condition . ' RETURNING status', [$ticket, $owner])->fetchColumn();
         if ($priorStatus !== false) {
-            query($db, "UPDATE tickets SET status = 'Erledigt' WHERE id = ?", [$ticket]);
+            query($db, 'UPDATE tickets SET status = ? WHERE id = ?', [$status, $ticket]);
             query($db, "UPDATE ticket_status_history SET role = 'customer' WHERE id = (
                 SELECT MAX(id) FROM ticket_status_history WHERE ticket_id = ?)", [$ticket]);
             $outboxId = queueMail($db, $adminEmail, 'admin', $ticket);
-            query($db, "INSERT INTO status_notifications (outbox_id, old_status, new_status) VALUES (?, ?, 'Erledigt')",
-                [$outboxId, $priorStatus]);
+            query($db, 'INSERT INTO status_notifications (outbox_id, old_status, new_status) VALUES (?, ?, ?)',
+                [$outboxId, $priorStatus, $status]);
+            if ($reason !== '') {
+                $comment = recordStatusComment($db, $ticket, 'customer', $reason, $files);
+                query($db, 'INSERT INTO comment_notifications (outbox_id, comment_id) VALUES (?, ?)', [$outboxId, $comment]);
+            }
         }
         $db->commit();
         return $priorStatus !== false;
@@ -283,9 +314,13 @@ function storeImportedMessage(PDO $db, ?array $mail, string $mailbox, string $va
                 if ($ticket !== null) {
                     query($db, "INSERT INTO ticket_comments (ticket_id, role, body, created_at) VALUES (?, 'customer', ?, ?)",
                         [$ticket, replyComment($mail), time()]);
-                    queueCommentNotification($db, $ticket, (int) $db->lastInsertId(), $adminEmail, 'admin');
+                    $comment = (int) $db->lastInsertId();
+                    storeAttachments($db, $ticket, $comment, $mail['files'] ?? []);
+                    queueCommentNotification($db, $ticket, $comment, $adminEmail, 'admin');
                 } else {
-                    $ticket = createTicket($db, $mail['email'], $mail['subject'], $mail['body'], ['attachments' => $mail['attachments']]);
+                    $ticket = createTicket($db, $mail['email'], $mail['subject'], $mail['body'], [
+                        'attachments' => $mail['attachments'], 'files' => $mail['files'] ?? [],
+                    ]);
                     query($db, 'INSERT INTO unread_tickets (ticket_id) VALUES (?)', [$ticket]);
                     queueMail($db, $mail['email'], 'customer', $ticket);
                     queueMail($db, $adminEmail, 'admin', $ticket);
@@ -349,13 +384,13 @@ function splitQuotedReply(string $body): array
 function replyComment(array $mail): string
 {
     [$body, $quote] = splitQuotedReply($mail['body']);
-    if ($body === '') {
+    if ($body === '' && ($quote !== '' || empty($mail['files']))) {
         $body = '[Die E-Mail enthält keinen übernommenen Antworttext.]';
     }
     if ($mail['attachments']) {
-        $body .= "\n\n[Anhänge liegen in der Antwort-E-Mail im Ticketpostfach.]";
+        $body .= "\n\n[Weitere Anhänge können in der Original-E-Mail im Ticketpostfach liegen.]";
     }
-    return $quote === '' ? $body : $body . "\n\n" . $quote;
+    return $quote === '' || $body === '' ? $body : $body . "\n\n" . $quote;
 }
 
 function compactEmailQuote(string $quote): string

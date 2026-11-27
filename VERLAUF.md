@@ -169,7 +169,17 @@ Paket: `Waxenberger-Ticketportal-Vollpaket-Ticketnummern-und-Archiv.zip`.
 
 Für neue Tickets lautet das Format jetzt beispielsweise `T-2026-5837`. Alle bereits vergebenen Nummern bleiben gültig. Die Anwendung wählt zufällig aus den freien vierstelligen Folgen des jeweiligen Jahres.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Vierstellige-Ticketnummern.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Vierstellige-Ticketnummern.zip`.
+
+## 20. Wiederöffnen, Dateianhänge und Datensicherung
+
+Kunden können eigene erledigte Tickets mit Begründung auf **Wieder geöffnet** setzen. Die Konversation zeigt den Statuswechsel und die Begründung. Kunde und Verwaltung erhalten eine Statusmail. Ein zuvor archiviertes Ticket kehrt dabei in die reguläre Übersicht zurück.
+
+Portal und Verwaltung speichern Dateien und Bildvorschauen in der Konversation. Der E-Mail-Import übernimmt auch Anhänge und eingebettete Bilder aus neuen Nachrichten und Antworten. Downloads sind auf die Verwaltung und die Inhaber der jeweiligen Tickets beschränkt.
+
+Die Verwaltung kann eine ZIP-Datensicherung herunterladen und nach Bestätigung wiederherstellen. Der Integrationstest deckt die Migration von Version 8, die Rollenrechte, Statusmails, Upload, Mailimport und den Wiederherstellungsablauf ab.
+
+Paket: `Waxenberger-Ticketportal-Vollpaket-Wiederoeffnen-Anhaenge-Datensicherung.zip`.
 
 ## Installation und Betrieb
 

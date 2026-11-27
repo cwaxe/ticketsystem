@@ -62,9 +62,11 @@ button:hover, .button:hover { background: #193e92 }
     color: var(--status-text, #183a76);
     box-shadow: inset 4px 0 var(--status-accent, #2756a8);
 }
+.status-group-reopened { --status-background: #def5ef; --status-text: #08544b; --status-accent: #0d766d }
 .status-group-in-progress { --status-background: #f0eafa; --status-text: #462c73; --status-accent: #6847a5 }
 .status-group-waiting { --status-background: #fff2d6; --status-text: #744500; --status-accent: #a06609 }
 .status-group-closed { --status-background: #e0f3e7; --status-text: #145535; --status-accent: #288250 }
+.badge.status-group-reopened { background: var(--status-background); color: var(--status-text); border-color: var(--status-accent) }
 .badge.ticket-new { margin-left: 6px; padding: 2px 9px; background: var(--blue); border-color: var(--blue); color: var(--white); vertical-align: middle }
 .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 15px; background: var(--pale) }
 .filters label:first-child { flex: 1 1 230px }
@@ -204,3 +206,14 @@ td small { display: block; margin-top: 2px }
     main { margin-top: 27px }
     .filters .button { margin-left: 0 }
 }
+
+.conversation-event.status-group-reopened .conversation-event-label {
+  background: var(--status-background);
+  color: var(--status-text);
+  border-color: var(--status-accent)
+}
+.attachment-list { display: flex; flex-wrap: wrap; gap: .75rem; list-style: none; padding: 0; margin: .75rem 0 0 }
+.attachment-list li { display: grid; align-content: start; gap: .25rem; max-width: 13rem; overflow-wrap: anywhere }
+.attachment-list img { display: block; max-width: 100%; max-height: 9rem; object-fit: contain; border-radius: 6px }
+.backup-confirm { display: flex; gap: .5rem; align-items: baseline }
+.backup-confirm input { width: auto }

@@ -41,6 +41,7 @@ function renderHtmlMail(string $baseUrl, string $subject, string $body, string $
     $heading = $escape($subject);
     $statusColors = match ($status) {
         'Offen' => ['#2756a8', '#e8efff', '#183a76'],
+        'Wieder geöffnet' => ['#0d766d', '#def5ef', '#08544b'],
         'In Arbeit' => ['#6847a5', '#f0eafa', '#462c73'],
         'Wartet' => ['#a06609', '#fff2d6', '#744500'],
         'Erledigt' => ['#288250', '#e0f3e7', '#145535'],
@@ -195,8 +196,9 @@ function deliverOutbox(PDO $db, array $config, ?callable $send = null): array
     query($db, 'DELETE FROM links WHERE expires_at <= ?', [$now]);
     query($db, 'DELETE FROM rate_limits WHERE expires_at <= ?', [$now]);
     query($db, 'DELETE FROM outbox WHERE ticket_id IS NULL AND created_at <= ?', [$now - LINK_SECONDS]);
-    $rows = query($db, 'SELECT o.*, c.body AS comment_body, s.old_status, s.new_status, tn.number AS ticket_number,
-        t.email AS ticket_sender, t.subject AS ticket_subject, t.body AS ticket_body, t.attachment_notice
+    $rows = query($db, 'SELECT o.*, c.body AS comment_body, c.role AS comment_role, s.old_status, s.new_status, tn.number AS ticket_number,
+        t.email AS ticket_sender, t.subject AS ticket_subject, t.body AS ticket_body, t.attachment_notice,
+        (SELECT COUNT(*) FROM ticket_attachments a WHERE a.ticket_id = o.ticket_id AND a.comment_id IS c.id) AS attachment_count
         FROM outbox o
         LEFT JOIN comment_notifications n ON n.outbox_id = o.id LEFT JOIN ticket_comments c ON c.id = n.comment_id
         LEFT JOIN status_notifications s ON s.outbox_id = o.id
@@ -239,6 +241,7 @@ function outboxMessage(PDO $db, array $config, array $row): array
 {
     $comment = $row['comment_body'] ?? null;
     $newStatus = $row['new_status'] ?? null;
+    $filesInPortal = !empty($row['attachment_count']) ? "\n\nDateianhänge finden Sie im Ticketportal." : '';
     if ($comment !== null || $newStatus !== null) {
         $ticket = (int) $row['ticket_id'];
         $code = ticketCode($ticket, $row['ticket_number'] ?? null);
@@ -246,7 +249,7 @@ function outboxMessage(PDO $db, array $config, array $row): array
         if ($newStatus === null) {
             if ($admin) {
                 [$comment] = splitQuotedReply($comment);
-                $comment = $comment !== '' ? $comment : 'Die E-Mail enthält keinen übernommenen Antworttext.';
+                $comment = $comment !== '' || $filesInPortal !== '' ? $comment : 'Die E-Mail enthält keinen übernommenen Antworttext.';
             }
             $subject = 'Kommentar zu Ticket ' . $code;
             $intro = ($admin ? 'zu Ticket ' . $code . ' ist ein neuer Kundenkommentar eingegangen.'
@@ -254,28 +257,32 @@ function outboxMessage(PDO $db, array $config, array $row): array
         } else {
             $subject = 'Statusänderung zu Ticket ' . $code;
             $change = 'von „' . $row['old_status'] . '“ auf „' . $newStatus . '“';
-            $intro = $admin ? 'der Kunde hat Ticket ' . $code . ' geschlossen. Der Status wechselte ' . $change . '.'
+            $reopened = $newStatus === 'Wieder geöffnet';
+            $intro = $admin
+                ? 'der Kunde hat Ticket ' . $code . ($reopened ? ' wieder geöffnet.' : ' geschlossen.') . ' Der Status wechselte ' . $change . '.'
                 : 'der Status Ihres Tickets ' . $code . ' wurde ' . $change . ' geändert.';
             if ($comment !== null) {
-                $intro .= "\n\nKommentar zur Statusänderung:\n" . $comment;
+                $label = $reopened && ($row['comment_role'] ?? '') === 'customer'
+                    ? 'Begründung zum Wiederöffnen' : 'Kommentar zur Statusänderung';
+                $intro .= "\n\n" . $label . ":\n" . $comment;
             }
         }
         $reply = $admin ? '' : "\n\nSie können direkt auf diese E-Mail antworten. Ihre Antwort wird dem Ticket zugeordnet.";
         return [
             $subject,
-            "Guten Tag,\n\n" . $intro . $reply . "\n\nZum Ticketportal:\n" . $config['base_url'] . '?id=' . $ticket,
+            "Guten Tag,\n\n" . $intro . $filesInPortal . $reply . "\n\nZum Ticketportal:\n" . $config['base_url'] . '?id=' . $ticket . ($admin ? '&admin=1' : ''),
         ];
     }
     if ($row['role'] === 'admin' && $row['ticket_id'] !== null) {
         $ticket = (int) $row['ticket_id'];
         $code = ticketCode($ticket, $row['ticket_number'] ?? null);
         $text = $row['ticket_body'] !== '' ? $row['ticket_body'] : 'Die E-Mail enthält keinen übernommenen Nachrichtentext.';
-        $attachments = $row['attachment_notice'] ? "\n\nAnhänge liegen in der Original-E-Mail im Ticketpostfach." : '';
+        $attachments = $row['attachment_notice'] ? "\n\nWeitere Anhänge können in der Original-E-Mail im Ticketpostfach liegen." : '';
         return [
             'Neues Ticket ' . $code,
             "Guten Tag,\n\nim Ticketportal wurde das Ticket " . $code . " erfasst.\n\n"
                 . 'Absender: ' . $row['ticket_sender'] . "\nBetreff: " . $row['ticket_subject'] . "\n\n"
-                . $text . $attachments . "\n\nZum Ticket:\n" . $config['base_url'] . '?id=' . $ticket . '&admin=1',
+                . $text . $filesInPortal . $attachments . "\n\nZum Ticket:\n" . $config['base_url'] . '?id=' . $ticket . '&admin=1',
         ];
     }
 
@@ -349,12 +356,67 @@ function parseTicketMail(string $raw, bool $limited, array $config): ?array
         static fn (string $reference): string => '<' . trim($reference, " \t\r\n<>") . '>',
         $references
     )));
+    [$files, $omitted] = $limited ? [[], true] : parseMailAttachments($message);
     return [
         'email' => $sender,
         'subject' => $subject !== '' ? mb_substr($subject, 0, 180) : '(Ohne Betreff)',
         'body' => $body,
-        'attachments' => (int) (!$limited && $message->getAttachmentCount() > 0),
+        'attachments' => (int) $omitted,
+        'files' => $files,
         'message_id' => $messageId !== '' ? '<' . $messageId . '>' : '',
         'references' => $references,
     ];
+}
+
+function parseMailAttachments(Message $message): array
+{
+    $files = [];
+    $omitted = false;
+    $total = 0;
+    foreach ($message->getAllAttachmentParts() as $part) {
+        $filename = $part->getFilename();
+        $type = strtolower($part->getContentType());
+        $disposition = strtolower($part->getContentDisposition() ?? '');
+        if ($filename === null && $disposition !== 'attachment' && in_array($type, ['text/plain', 'text/html'], true)) {
+            continue;
+        }
+        if (count($files) >= MAX_ATTACHMENTS) {
+            $omitted = true;
+            break;
+        }
+        $contents = '';
+        try {
+            $stream = $part->getBinaryContentStream();
+            if ($stream === null) {
+                $omitted = true;
+                continue;
+            }
+            $limit = min(MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_TOTAL - $total);
+            while (!$stream->eof() && strlen($contents) <= $limit) {
+                $chunk = $stream->read(65536);
+                if ($chunk === '' && !$stream->eof()) {
+                    throw new RuntimeException('Anhang konnte nicht vollständig gelesen werden.');
+                }
+                $contents .= $chunk;
+            }
+        } catch (RuntimeException) {
+            $omitted = true;
+            continue;
+        }
+        if (strlen($contents) > $limit) {
+            $omitted = true;
+            continue;
+        }
+        $defaultName = match ($type) {
+            'image/png' => 'Bild.png',
+            'image/jpeg' => 'Bild.jpg',
+            'image/gif' => 'Bild.gif',
+            'image/webp' => 'Bild.webp',
+            'message/rfc822' => 'Nachricht.eml',
+            default => 'Anhang',
+        };
+        $files[] = makeAttachment($filename ?? $defaultName, $contents);
+        $total += strlen($contents);
+    }
+    return [$files, $omitted];
 }

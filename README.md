@@ -6,7 +6,7 @@ Für netcup Webhosting siehe [NETCUP.md](NETCUP.md). Die Entwicklung und die Än
 
 ## Voraussetzungen
 
-- PHP ab 8.2, mit `pdo_sqlite` und SQLite ab 3.35. PHP-CLI für den Mailjob benötigt zusätzlich OpenSSL, `mbstring` und `curl` mit SMTP/SMTPS.
+- PHP ab 8.2, mit `pdo_sqlite` und SQLite ab 3.35. Für die Datensicherung benötigt der Webprozess die PHP-Erweiterung `zip`. PHP-CLI für den Mailjob benötigt zusätzlich OpenSSL, `mbstring` und `curl` mit SMTP/SMTPS.
 - Eigene HTTPS-Adresse, zum Beispiel `ticket.edv-waxenberger.de`, mit einem einstellbaren Dokumentenstamm. Ein Unterverzeichnis ist möglich, wenn sein Inhalt auf `public/` abgebildet wird und `private/` außerhalb aller öffentlich erreichbaren Verzeichnisse liegt.
 - Cronjob beziehungsweise geplante CLI-Aufgabe auf dem Webspace. PHP-Webprozess und Cron müssen auf dieselbe private SQLite-Datei und das Sitzungsverzeichnis schreiben können. Das Beispiel setzt voraus, dass beide unter dem eigenen Hosting-Benutzer laufen.
 - Das Postfach muss IMAP mit implizitem TLS und SMTP mit SMTP-Authentifizierung über TLS unterstützen. Bei einem Anbieter mit reinem OAuth-Zugang muss die Mailanbindung angepasst werden.
@@ -34,7 +34,7 @@ Sichere die SQLite-Datenbank und die Konfiguration. Entpacke die ZIP dort, wo `p
 
 ## Bedienung
 
-- Kunden sehen die Tickets ihrer jeweiligen Absenderadresse und deren Status. Sie können Kommentare hinzufügen und eigene Tickets schließen. Der Anmeldelink gilt höchstens 24 Stunden und kann einmal verwendet werden. Die Anmeldung wird im Portal bestätigt, damit ein bloßer Linkabruf durch einen E-Mail-Scanner den Link nicht verbraucht. Im Kundenportal lassen sich neue Links anfordern.
+- Kunden sehen die Tickets ihrer jeweiligen Absenderadresse und deren Status. Sie können Kommentare hinzufügen, eigene Tickets schließen und erledigte Tickets mit einer Begründung wieder öffnen. Ein solches Ticket erhält den Status **Wieder geöffnet**. Die Begründung erscheint in der Konversation und wird an Kunde und Verwaltung geschickt. Der Anmeldelink gilt höchstens 24 Stunden und kann einmal verwendet werden. Die Anmeldung wird im Portal bestätigt, damit ein bloßer Linkabruf durch einen E-Mail-Scanner den Link nicht verbraucht. Im Kundenportal lassen sich neue Links anfordern.
 - Erledigte Tickets haben einen grünen Ticketkopf mit Haken und Abzeichen. Ein gespeicherter Abschlusszeitpunkt erscheint unter dem Betreff. In der Verwaltung stehen Status, Priorität und Fälligkeit oberhalb der Konversation. Kundenzuordnung und interne Notiz lassen sich aufklappen.
 - In der Konversation stehen Nachrichten und Statuswechsel in zeitlicher Reihenfolge. Neue Statuswechsel zeigen Zeitpunkt, Rolle sowie alten und neuen Status. Gespeicherte frühere Abschlüsse erscheinen mit ihrem Datum.
 - Die Ticketdetailseite zeigt die erste Anfrage und alle Antworten chronologisch als Konversation. Im aufgeklappten E-Mail-Zitat stehen die Mail-Kopfzeilen zusammen und zwischen Absätzen bleibt höchstens eine Leerzeile.
@@ -49,9 +49,22 @@ Sichere die SQLite-Datenbank und die Konfiguration. Entpacke die ZIP dort, wo `p
 - Neue Tickets erhalten eine eindeutige Zufallsnummer mit Jahreszahl, etwa `T-2026-5837`. Bereits vergebene Nummern bleiben erhalten.
 - Erledigte Tickets können in der Verwaltung archiviert und aus dem **Archiv** zurückgeholt werden. Beim Wiederöffnen kehren sie in die normale Übersicht zurück. Kunden sehen ihre eigenen archivierten Tickets weiterhin im Portal.
 - Unter **Bearbeitungszeiten** siehst du die verstrichene Zeit vom Eingang bis zum Schließen. Mit `php private/admin-login.php --send` kannst du als Hosting-Administrator einen Admin-Einmal-Link anfordern, falls das Webformular sein Limit erreicht hat.
-- Die E-Mails bleiben im Ticketpostfach. Der Import übernimmt den Text und kennzeichnet Anhänge, die im Originalpostfach bleiben. Reguläre Nachrichten ohne passende Nachrichtenreferenz und Absenderadresse werden als neue Tickets erfasst. Automatische Antworten und viele Verteiler- oder Unzustellbarkeitsnachrichten werden übersprungen.
+- Die E-Mails bleiben im Ticketpostfach. Der Import übernimmt Text, Dateien und eingebettete Bilder aus neuen Nachrichten und Antworten. Der Mailjob liest bis zu 8 MiB der vollständigen E-Mail einschließlich Kodierung. Bei größeren Nachrichten wird ein Hinweis auf das Originalpostfach angezeigt. Reguläre Nachrichten ohne passende Nachrichtenreferenz und Absenderadresse werden als neue Tickets erfasst. Automatische Antworten und viele Verteiler- oder Unzustellbarkeitsnachrichten werden übersprungen.
 - Wenn der SMTP-Server einen Versand ablehnt, bleibt dieser in der Warteschlange und wird erneut versucht. `php private/worker.php --send-only` verarbeitet testweise nur den Versand. Bei einer Verbindungstrennung nach Annahme durch den SMTP-Server kann eine Bestätigung erneut versandt werden.
 - Nach Änderung der IMAP-UIDVALIDITY hält der Import an. Dann bewusst neu initialisieren. Eine vorhandene Message-ID je Absender dient der Deduplizierung. Für Nachrichten ohne Message-ID steht nach einem UID-Reset keine zuverlässige Zuordnung zu vorher importierten Nachrichten zur Verfügung.
-- Sichere die SQLite-Datenbank regelmäßig konsistent, etwa mit der SQLite-Backup-Funktion, sowie die Konfiguration.
+- Kunden und Verwaltung können Dateien an Antworten anhängen. Die Verwaltung kann sie auch direkt beim Anlegen eines Tickets hinterlegen. PNG, JPEG, GIF und WebP werden in der Konversation als Vorschau angezeigt. E-Mail-Benachrichtigungen verweisen für Anhänge auf das Portal.
+- Portal-Uploads sind auf zehn Dateien, 8 MiB pro Datei und 16 MiB insgesamt je Beitrag begrenzt. PHP- und Webserver-Limits können die tatsächlich mögliche Uploadgröße weiter begrenzen.
+
+## Datensicherung und Wiederherstellung
+
+In der Verwaltung unter **Datensicherung** lässt sich eine ZIP mit dem gesamten Anwendungsdatenbestand herunterladen. Dazu gehören die Tickets, Kundenzuordnungen, Konversationen, Statusverlauf, Archiv, sämtliche im Portal gespeicherten Anhänge, Mail-Einstellungen, Versandwarteschlange und der IMAP-Importstand. Die auf dem Server liegende `private/config.php` mit Zugangsdaten und Schlüssel sowie Originalmails im Postfach werden separat gesichert.
+
+Vor einer Wiederherstellung eine aktuelle Sicherung herunterladen. Die hochgeladene Sicherung muss zum Datenbankschema der installierten Version passen. Nach Prüfung des Dateiformats, der Prüfsumme und der Datenbankintegrität wird der Bestand in einer Transaktion ersetzt. Alte Anmeldelinks werden ungültig. Der Mailjob setzt bei dem gesicherten Stand an. Bei einer älteren Sicherung können Nachrichten seit diesem Zeitpunkt je nach Postfachbestand erneut importiert oder anstehende Benachrichtigungen erneut versendet werden.
+
+Eine Sicherung unterstützt Datenbanken bis 512 MiB. Für den ZIP-Upload gelten zusätzlich die Uploadgrenzen des Webhostings.
+
+## Integrationstest
+
+Nach `composer install --working-dir=private --no-dev --prefer-dist` lässt sich mit `python3 tests/portal_features.py` der Ablauf für Wiederöffnung, Benachrichtigungen, Anhänge, Mailimport und Sicherung prüfen. Der Test benötigt PHP mit `pdo_sqlite`, `mbstring` und `zip` und verwendet ein temporäres Portal mit Testadressen.
 
 Logo und Favicon stammen von der Firmenwebsite. Die Links für Impressum und Datenschutz führen zu den bestehenden Seiten.

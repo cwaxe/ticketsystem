@@ -186,5 +186,35 @@ BEGIN
     DELETE FROM ticket_archive WHERE ticket_id = NEW.id;
 END;
 
-PRAGMA user_version = 8;
+CREATE UNIQUE INDEX IF NOT EXISTS ticket_comments_attachment_parent ON ticket_comments(id, ticket_id);
+CREATE TABLE IF NOT EXISTS ticket_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    comment_id INTEGER,
+    filename TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    contents BLOB NOT NULL CHECK (typeof(contents) = 'blob' AND length(contents) <= 8388608),
+    FOREIGN KEY (comment_id, ticket_id) REFERENCES ticket_comments(id, ticket_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ticket_attachments_ticket ON ticket_attachments(ticket_id, comment_id, id);
+
+CREATE TABLE IF NOT EXISTS ticket_activity (
+    id INTEGER PRIMARY KEY,
+    comment_id INTEGER UNIQUE REFERENCES ticket_comments(id) ON DELETE CASCADE,
+    status_id INTEGER REFERENCES ticket_status_history(id) ON DELETE CASCADE,
+    CHECK (comment_id IS NOT NULL OR status_id IS NOT NULL)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ticket_activity_status ON ticket_activity(status_id) WHERE comment_id IS NULL;
+CREATE TRIGGER IF NOT EXISTS ticket_activity_comment
+AFTER INSERT ON ticket_comments
+BEGIN
+    INSERT INTO ticket_activity (comment_id) VALUES (NEW.id);
+END;
+CREATE TRIGGER IF NOT EXISTS ticket_activity_status_change
+AFTER INSERT ON ticket_status_history
+BEGIN
+    INSERT INTO ticket_activity (status_id) VALUES (NEW.id);
+END;
+
+PRAGMA user_version = 9;
 COMMIT;

@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require dirname(__DIR__) . '/private/app.php';
+require dirname(__DIR__) . '/private/backup.php';
 
 header('Cache-Control: no-store');
 header('Referrer-Policy: no-referrer');
@@ -76,7 +77,8 @@ try {
     $admin = ($user['role'] ?? '') === 'admin';
     $report = field($_GET, 'auswertung') === '1';
     $signatureSettings = field($_GET, 'signatur') === '1';
-    if (($report || $signatureSettings) && !$admin) {
+    $backupSettings = field($_GET, 'sicherung') === '1';
+    if (($report || $signatureSettings || $backupSettings) && !$admin) {
         http_response_code(403);
         exit('Dieser Bereich ist für die Verwaltung vorgesehen.');
     }
@@ -96,7 +98,16 @@ try {
     $groupContext = $grouped || $onlyNew || $archiveView ? $listParams + ($page > 1 ? ['seite' => $page] : []) : [];
     $db = database();
     $notice = '';
-    if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+    $method = $_SERVER['REQUEST_METHOD'] ?? '';
+    if ($method === 'GET' && isset($_GET['anhang'])) {
+        sendTicketAttachment($db, (int) field($_GET, 'anhang'), $user, field($_GET, 'vorschau') === '1');
+    }
+    if ($method === 'POST') {
+        if (!$_POST && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0 &&
+            str_starts_with($_SERVER['CONTENT_TYPE'] ?? '', 'multipart/form-data')) {
+            http_response_code(413);
+            exit('Die Dateien überschreiten die auf dem Server eingestellte Uploadgröße.');
+        }
         if (!hash_equals($_SESSION['csrf'], field($_POST, 'csrf'))) {
             http_response_code(403);
             exit('Die Seite ist abgelaufen. Bitte öffnen Sie das Ticketportal erneut.');
@@ -147,8 +158,38 @@ try {
                 go($config, '?signatur=1&saved=1');
             }
         }
-        if ($action === 'comment' || $action === 'close') {
-            if (!$user || ($action === 'close' && $admin)) {
+        if (in_array($action, ['backup-export', 'backup-restore'], true)) {
+            if (!$admin || !$backupSettings) {
+                http_response_code(403);
+                exit('Dieser Bereich ist für die Verwaltung vorgesehen.');
+            }
+            if (!class_exists(ZipArchive::class)) {
+                $notice = 'Bitte aktivieren Sie die PHP-Erweiterung zip für das Ticketportal.';
+            } else {
+                try {
+                    if ($action === 'backup-export') {
+                        exportBackup($db);
+                    }
+                    $upload = $_FILES['backup'] ?? [];
+                    if (field($_POST, 'replace_data') !== '1') {
+                        throw new InvalidArgumentException('Bitte bestätigen Sie, dass die aktuellen Daten ersetzt werden.');
+                    }
+                    if (($upload['error'] ?? null) !== UPLOAD_ERR_OK || !is_uploaded_file($upload['tmp_name']) ||
+                        $upload['size'] > BACKUP_MAX_UPLOAD_BYTES) {
+                        throw new InvalidArgumentException('Wählen Sie eine gültige ZIP-Datei innerhalb der Uploadgrenze Ihres Servers.');
+                    }
+                    restoreBackup($db, $upload['tmp_name']);
+                    go($config, '?sicherung=1&restored=1');
+                } catch (InvalidArgumentException $error) {
+                    $notice = $error->getMessage();
+                } catch (RuntimeException $error) {
+                    error_log('Ticketportal Datensicherung: ' . $error->getMessage());
+                    $notice = 'Die Datensicherung konnte nicht verarbeitet werden.';
+                }
+            }
+        }
+        if (in_array($action, ['comment', 'close', 'reopen'], true)) {
+            if (!$user || ($action !== 'comment' && $admin)) {
                 http_response_code(403);
                 exit('Diese Aktion ist für Ihr Konto nicht verfügbar.');
             }
@@ -156,16 +197,29 @@ try {
                 if (closeCustomerTicket($db, $id, $user['email'], $config['admin_email'])) {
                     go($config, '?id=' . $id . '&closed=1');
                 }
-                $notice = 'Dieses Ticket ist bereits geschlossen.';
+                $notice = 'Dieses Ticket konnte nicht geschlossen werden.';
             } else {
-                $comment = trim(field($_POST, 'comment'));
-                if (strlen($comment) > MAX_COMMENT_LENGTH * 4 ||
-                    !preg_match('/\A.{1,' . MAX_COMMENT_LENGTH . '}\z/su', $comment)) {
-                    $notice = 'Bitte geben Sie einen Kommentar mit höchstens ' . MAX_COMMENT_LENGTH . ' Zeichen ein.';
-                } elseif (addPortalComment($db, $id, $user, $comment, $config['admin_email'])) {
-                    go($config, '?' . http_build_query(['id' => $id] + $groupContext) . '#antwort');
-                } else {
-                    $notice = 'Dieses Ticket ist bereits geschlossen.';
+                try {
+                    $comment = trim(field($_POST, 'comment'));
+                    $files = uploadedAttachments($_FILES['attachments'] ?? []);
+                    if (strlen($comment) > MAX_COMMENT_LENGTH * 4 ||
+                        !preg_match('/\A[^\x00]{0,' . MAX_COMMENT_LENGTH . '}\z/u', $comment)) {
+                        throw new InvalidArgumentException('Bitte verwenden Sie höchstens ' . MAX_COMMENT_LENGTH . ' Zeichen.');
+                    }
+                    if ($action === 'reopen') {
+                        if (reopenCustomerTicket($db, $id, $user['email'], $config['admin_email'], $comment, $files)) {
+                            go($config, '?id=' . $id . '&reopened=1#antwort');
+                        }
+                        $notice = 'Dieses Ticket konnte nicht wieder geöffnet werden.';
+                    } elseif ($comment === '' && !$files) {
+                        $notice = 'Bitte schreiben Sie eine Antwort oder wählen Sie einen Anhang.';
+                    } elseif (addPortalComment($db, $id, $user, $comment, $config['admin_email'], $files)) {
+                        go($config, '?' . http_build_query(['id' => $id] + $groupContext) . '#antwort');
+                    } else {
+                        $notice = 'Zu diesem Ticket konnte keine Antwort gespeichert werden.';
+                    }
+                } catch (InvalidArgumentException $error) {
+                    $notice = $error->getMessage();
                 }
             }
         }
@@ -248,8 +302,13 @@ try {
                     if (!$email || $subject === '' || strlen($subject) > 720 || strlen($body) > MAX_TICKET_LENGTH * 4) {
                         $notice = 'Bitte prüfen Sie E-Mail-Adresse, Betreff und Nachricht.';
                     } else {
-                        $ticket = createTicket($db, $email, $subject, $body, compact('status', 'priority', 'due', 'notes'));
-                        go($config, '?id=' . $ticket . '&saved=1');
+                        try {
+                            $files = uploadedAttachments($_FILES['attachments'] ?? []);
+                            $ticket = createTicket($db, $email, $subject, $body, compact('status', 'priority', 'due', 'notes', 'files'));
+                            go($config, '?id=' . $ticket . '&saved=1');
+                        } catch (InvalidArgumentException $error) {
+                            $notice = $error->getMessage();
+                        }
                     }
                 }
             }
@@ -264,7 +323,9 @@ try {
     $conversation = [];
     $rows = [];
     $statusGroups = [];
-    if ($signatureSettings) {
+    if ($backupSettings) {
+        $canBackup = class_exists(ZipArchive::class);
+    } elseif ($signatureSettings) {
         $signature = ($action ?? '') === 'save-signature' ? field($_POST, 'signature') : mailSignature($db);
     } elseif ($report) {
         $stats = query($db, "SELECT
@@ -276,19 +337,32 @@ try {
         $recent = query($db, 'SELECT t.id, t.subject, t.received_at, c.closed_at, tn.number AS ticket_number FROM ticket_closures c
             JOIN tickets t ON t.id = c.ticket_id LEFT JOIN ticket_numbers tn ON tn.ticket_id = t.id
             ORDER BY c.closed_at DESC, c.ticket_id DESC LIMIT 25')->fetchAll();
-    } elseif ($user && ($id > 0 || in_array($action ?? '', ['comment', 'close'], true))) {
+    } elseif ($user && ($id > 0 || in_array($action ?? '', ['comment', 'close', 'reopen'], true))) {
         $parameters = $admin ? [$id] : [$id, $user['email']];
         $detail = query($db, 'SELECT t.*, c.closed_at, tn.number AS ticket_number, a.archived_at
             FROM tickets t LEFT JOIN ticket_closures c ON c.ticket_id = t.id
             LEFT JOIN ticket_numbers tn ON tn.ticket_id = t.id LEFT JOIN ticket_archive a ON a.ticket_id = t.id
             WHERE t.id = ?' . ($admin ? '' : ' AND t.email = ?'), $parameters)->fetch();
         if ($detail) {
-            $conversation = query($db, "SELECT role, body, created_at, id, NULL AS old_status, NULL AS new_status, 0 AS status_event, 1 AS event_order
-                FROM ticket_comments WHERE ticket_id = ?
+            $attachments = [];
+            $files = query($db, 'SELECT id, comment_id, filename, media_type, length(contents) AS size
+                FROM ticket_attachments WHERE ticket_id = ? ORDER BY id', [$id]);
+            foreach ($files as $file) {
+                $attachments[$file['comment_id'] ?? 0][] = $file;
+            }
+            $conversation = query($db, "SELECT c.role, c.body, c.created_at, c.id AS id, NULL AS old_status, NULL AS new_status,
+                0 AS status_event, COALESCE(parent.id, a.id, 0) AS activity_order, 1 AS event_order
+                FROM ticket_comments c
+                LEFT JOIN ticket_activity a ON a.comment_id = c.id
+                LEFT JOIN ticket_activity parent ON parent.status_id = a.status_id AND parent.comment_id IS NULL
+                WHERE c.ticket_id = ?
                 UNION ALL
-                SELECT role, NULL, created_at, id, old_status, new_status, 1, CASE WHEN new_status = 'Erledigt' THEN 2 ELSE 0 END
-                FROM ticket_status_history WHERE ticket_id = ?
-                ORDER BY created_at, event_order, id", [$id, $id])->fetchAll();
+                SELECT s.role, NULL, s.created_at, s.id, s.old_status, s.new_status, 1, COALESCE(a.id, 0),
+                    CASE WHEN s.new_status = 'Erledigt' THEN 2 ELSE 0 END
+                FROM ticket_status_history s
+                LEFT JOIN ticket_activity a ON a.status_id = s.id AND a.comment_id IS NULL
+                WHERE s.ticket_id = ?
+                ORDER BY created_at, activity_order, event_order, id", [$id, $id])->fetchAll();
             if ($admin) {
                 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
                     query($db, 'DELETE FROM unread_tickets WHERE ticket_id = ?', [$id]);
@@ -309,7 +383,7 @@ try {
             $notice = 'Dieses Ticket konnte nicht gefunden werden.';
         }
     }
-    if ($user && !$report && !$signatureSettings && !$new && !$detail) {
+    if ($user && !$report && !$signatureSettings && !$backupSettings && !$new && !$detail) {
         $where = $admin ? [] : ['t.email = ?'];
         $parameters = $admin ? [] : [$user['email']];
         if ($search !== '') {
@@ -357,7 +431,7 @@ try {
                 $selection . ' GROUP BY tc.customer_id, c.name ORDER BY latest DESC, c.name, customer_id'
             : 'SELECT t.id, t.subject, t.email, t.status, t.priority, t.due, t.received_at, tn.number AS ticket_number' .
                 ($admin ? ', c.name AS customer_name, u.ticket_id IS NOT NULL AS is_new' : '') . $selection .
-                " ORDER BY CASE t.status WHEN 'Offen' THEN 0 WHEN 'In Arbeit' THEN 1 WHEN 'Wartet' THEN 2 WHEN 'Erledigt' THEN 3 ELSE 4 END, t.status" .
+                " ORDER BY CASE t.status WHEN 'Offen' THEN 0 WHEN 'Wieder geöffnet' THEN 1 WHEN 'In Arbeit' THEN 2 WHEN 'Wartet' THEN 3 WHEN 'Erledigt' THEN 5 ELSE 4 END, t.status" .
                 ($admin ? ', is_new DESC' : '') . ', t.id DESC';
         $rows = query($db, $listing . ' LIMIT 51 OFFSET ' . $offset, $parameters)->fetchAll();
         if (!$customerOverview) {
@@ -381,7 +455,7 @@ try {
   <link rel="icon" type="image/png" sizes="150x150" href="favicon-150.png">
   <link rel="icon" type="image/png" sizes="300x300" href="favicon-300.png">
   <link rel="apple-touch-icon" href="favicon-300.png">
-  <link rel="stylesheet" href="style.css?v=12">
+  <link rel="stylesheet" href="style.css?v=13">
   <?php if ($showLink): ?><script src="signin.js" defer></script><?php endif ?>
 </head>
 <body>
@@ -438,14 +512,44 @@ try {
   <?php endif ?>
 <?php else: ?>
   <div class="page-title">
-    <h1><?= $signatureSettings ? 'E-Mail-Signatur' : ($report ? 'Bearbeitungszeiten' : ($admin ? 'Ticketverwaltung' : 'Meine Tickets')) ?></h1>
+    <h1><?= match (true) {
+        $backupSettings => 'Datensicherung',
+        $signatureSettings => 'E-Mail-Signatur',
+        $report => 'Bearbeitungszeiten',
+        $admin => 'Ticketverwaltung',
+        default => 'Meine Tickets',
+    } ?></h1>
     <div class="page-actions">
       <?php if ($admin && !$report): ?><a class="button secondary" href="?auswertung=1">Bearbeitungszeiten</a><?php endif ?>
+      <?php if ($admin && !$backupSettings): ?><a class="button secondary" href="?sicherung=1">Datensicherung</a><?php endif ?>
       <?php if ($admin && !$signatureSettings): ?><a class="button secondary" href="?signatur=1">E-Mail-Signatur</a><?php endif ?>
       <form method="post" action="./"><?= csrfInput() ?><input type="hidden" name="action" value="logout"><button class="secondary">Abmelden</button></form>
     </div>
   </div>
-  <?php if ($signatureSettings): ?>
+  <?php if ($backupSettings): ?>
+    <a class="back" href="./">← Zur Ticketübersicht</a>
+    <?php if (field($_GET, 'restored') === '1'): ?><p class="notice" role="status">Die Datensicherung wurde wiederhergestellt.</p><?php endif ?>
+    <?php if (!$canBackup): ?>
+      <p class="notice">Für Datensicherung und Wiederherstellung muss die PHP-Erweiterung zip aktiviert sein.</p>
+    <?php else: ?>
+      <section class="panel detail editor">
+        <h2>Sicherung herunterladen</h2>
+        <p>Die ZIP-Datei enthält die gesamte Datenbank mit Tickets, Konversationen, Anhängen, Kundenzuordnungen, Archiv und Einstellungen. Server-Zugangsdaten aus <code>private/config.php</code> werden separat verwaltet.</p>
+        <form method="post" action="?sicherung=1">
+          <?= csrfInput() ?><button name="action" value="backup-export">ZIP herunterladen</button>
+        </form>
+        <hr>
+        <h2>Sicherung wiederherstellen</h2>
+        <p>Beim Wiederherstellen wird der aktuelle Datenbestand durch die Sicherung ersetzt. Laden Sie vorab eine aktuelle Sicherung herunter. Bereits verschickte Anmeldelinks werden ungültig.</p>
+        <form class="editor" method="post" enctype="multipart/form-data" action="?sicherung=1">
+          <?= csrfInput() ?>
+          <label>Sicherungsdatei<input type="file" name="backup" accept=".zip,application/zip" required></label>
+          <label class="backup-confirm"><input type="checkbox" name="replace_data" value="1" required> Ich möchte den aktuellen Datenbestand ersetzen.</label>
+          <button name="action" value="backup-restore">Sicherung wiederherstellen</button>
+        </form>
+      </section>
+    <?php endif ?>
+  <?php elseif ($signatureSettings): ?>
     <a class="back" href="./">← Zur Ticketübersicht</a>
     <?php if (field($_GET, 'saved') === '1'): ?><p class="notice" role="status">Signatur gespeichert.</p><?php endif ?>
     <section class="panel detail">
@@ -490,13 +594,14 @@ try {
     <?php if ($detail && field($_GET, 'saved') === '1'): ?><p class="notice" role="status">Ticket gespeichert.</p><?php endif ?>
     <?php if ($admin && $detail && field($_GET, 'zugeordnet') === '1'): ?><p class="notice" role="status">Kundenzuordnung gespeichert.</p><?php endif ?>
     <?php if ($detail && field($_GET, 'closed') === '1' && $detail['status'] === 'Erledigt'): ?><p class="notice" role="status">Ticket geschlossen.</p><?php endif ?>
+    <?php if ($detail && field($_GET, 'reopened') === '1' && $detail['status'] === 'Wieder geöffnet'): ?><p class="notice" role="status">Ticket wieder geöffnet.</p><?php endif ?>
     <?php if ($admin && $detail && field($_GET, 'archivstatus') === 'archive' && $detail['archived_at'] !== null): ?><p class="notice" role="status">Ticket archiviert.</p><?php endif ?>
     <?php if ($admin && $detail && field($_GET, 'archivstatus') === 'restore' && $detail['archived_at'] === null): ?><p class="notice" role="status">Ticket aus dem Archiv geholt.</p><?php endif ?>
     <?php if ($detail): ?>
       <?php $closedTicket = $detail['status'] === 'Erledigt'; ?>
       <header class="panel detail ticket-heading<?= $closedTicket ? ' ticket-heading-closed' : '' ?>">
         <div>
-          <p class="meta ticket-reference"><?= h(ticketCode((int) $detail['id'], $detail['ticket_number'])) ?><?php if (!$closedTicket): ?> · <span class="badge"><?= h($detail['status']) ?></span><?php endif ?><?php if ($admin && $detail['archived_at'] !== null): ?> · Im Archiv<?php endif ?></p>
+          <p class="meta ticket-reference"><?= h(ticketCode((int) $detail['id'], $detail['ticket_number'])) ?><?php if (!$closedTicket): ?> · <span class="badge<?= $detail['status'] === 'Wieder geöffnet' ? ' status-group-reopened' : '' ?>"><?= h($detail['status']) ?></span><?php endif ?><?php if ($admin && $detail['archived_at'] !== null): ?> · Im Archiv<?php endif ?></p>
           <h2><?= h($detail['subject']) ?></h2>
           <?php if ($closedTicket && $detail['closed_at'] !== null): ?>
             <p class="meta ticket-closed-at">Geschlossen am <time datetime="<?= h(date(DATE_ATOM, (int) $detail['closed_at'])) ?>"><?= h(date('d.m.Y \u\m H:i', (int) $detail['closed_at'])) ?> Uhr</time></p>
@@ -527,7 +632,7 @@ try {
     <div class="panel detail ticket-workspace<?= $detail ? ' ticket-workspace-thread' : '' ?>">
     <?php if ($admin): ?>
       <?php if (!$detail): ?><h2>Neues Ticket</h2><?php endif ?>
-      <form id="ticket-editor" class="editor<?= $detail ? ' ticket-editor' : '' ?>" method="post">
+      <form id="ticket-editor" class="editor<?= $detail ? ' ticket-editor' : '' ?>" method="post"<?= $new ? ' enctype="multipart/form-data"' : '' ?>>
         <?= csrfInput() ?><input type="hidden" name="id" value="<?= h($detail['id'] ?? 0) ?>"><input type="hidden" name="revision" value="<?= h($detail['revision'] ?? 0) ?>">
         <?php if ($new): ?>
           <label>E-Mail-Adresse des Kunden<input required type="email" name="email" maxlength="254" value="<?= h(field($_POST, 'email')) ?>"></label>
@@ -546,6 +651,7 @@ try {
           </label>
           <p id="status-comment-help" class="meta">Der Kunde erhält den Kommentar zusammen mit der Statusänderung per E-Mail.</p>
         <?php else: ?>
+          <label>Dateianhänge<input type="file" name="attachments[]" multiple></label>
           <label>Interne Notiz<textarea rows="4" name="notes" maxlength="24000"><?= h(field($_POST, 'notes')) ?></textarea></label>
           <button name="action" value="save">Ticket erstellen</button>
         <?php endif ?>
@@ -582,7 +688,7 @@ try {
         <?php $entries = array_merge([[
             'role' => 'customer',
             'created_at' => $detail['received_at'],
-            'body' => $detail['body'] !== '' ? $detail['body'] : 'Die E-Mail enthält keinen übernommenen Nachrichtentext.',
+            'body' => $detail['body'],
         ]], $conversation); ?>
         <ol class="conversation-list">
           <?php foreach ($entries as $position => $entry): ?>
@@ -590,7 +696,7 @@ try {
             $timestamp = (int) $entry['created_at'];
             ?>
             <?php if (!empty($entry['status_event'])): ?>
-              <li class="conversation-event<?= $entry['new_status'] === 'Erledigt' ? ' conversation-event-closed' : '' ?>">
+              <li class="conversation-event<?= $entry['new_status'] === 'Erledigt' ? ' conversation-event-closed' : ($entry['new_status'] === 'Wieder geöffnet' ? ' status-group-reopened' : '') ?>">
                 <div class="conversation-event-label">
                   <?php if ($entry['new_status'] === 'Erledigt'): ?><span class="ticket-closed-check" aria-hidden="true"></span><?php endif ?>
                   <time datetime="<?= h(date(DATE_ATOM, $timestamp)) ?>"><?= h(date('d.m.Y, H:i', $timestamp)) ?></time>
@@ -605,6 +711,7 @@ try {
             <?php endif ?>
             <?php
             $fromService = $entry['role'] === 'admin';
+            $entryFiles = $attachments[$entry['id'] ?? 0] ?? [];
             [$messageText, $mailQuote] = !$fromService && $position > 0
                 ? splitQuotedReply($entry['body'])
                 : [$entry['body'], ''];
@@ -613,9 +720,26 @@ try {
               <p class="conversation-byline"><strong><?= $fromService ? 'IT-Service' : 'Kunde' ?></strong>
                 <time datetime="<?= h(date(DATE_ATOM, $timestamp)) ?>"><?= h(date('d.m.Y, H:i', $timestamp)) ?> Uhr</time></p>
               <div class="conversation-bubble">
-                <div class="conversation-text"><?= h($messageText !== '' ? $messageText : 'Die E-Mail enthält keinen übernommenen Antworttext.') ?></div>
+                <?php if ($messageText !== '' || !$entryFiles): ?>
+                  <div class="conversation-text"><?= h($messageText !== '' ? $messageText : 'Die E-Mail enthält keinen übernommenen Antworttext.') ?></div>
+                <?php endif ?>
+                <?php if ($entryFiles): ?>
+                  <ul class="attachment-list" aria-label="Dateianhänge">
+                    <?php foreach ($entryFiles as $file): ?>
+                      <li>
+                        <?php if (previewableAttachment($file['media_type'])): ?>
+                          <a href="?anhang=<?= h($file['id']) ?>" aria-label="<?= h($file['filename']) ?> herunterladen">
+                            <img src="?anhang=<?= h($file['id']) ?>&amp;vorschau=1" alt="" loading="lazy">
+                          </a>
+                        <?php endif ?>
+                        <a href="?anhang=<?= h($file['id']) ?>"><?= h($file['filename']) ?></a>
+                        <small><?= h(number_format($file['size'] / 1024, 1, ',', '.')) ?> KiB</small>
+                      </li>
+                    <?php endforeach ?>
+                  </ul>
+                <?php endif ?>
                 <?php if ($position === 0 && $detail['attachment_notice']): ?>
-                  <p class="conversation-attachment"><?= $admin ? 'Anhänge liegen in der Original-E-Mail im Ticketpostfach.' : 'Anhänge wurden mit der Original-E-Mail übermittelt.' ?></p>
+                  <p class="conversation-attachment"><?= $admin ? 'Weitere Anhänge können in der Original-E-Mail im Ticketpostfach liegen.' : 'Weitere Anhänge aus der Original-E-Mail sind hier möglicherweise nicht verfügbar.' ?></p>
                 <?php endif ?>
                 <?php if ($mailQuote !== ''): ?>
                   <details class="conversation-quote">
@@ -627,11 +751,15 @@ try {
             </li>
           <?php endforeach ?>
         </ol>
-        <?php if ($detail['status'] !== 'Erledigt'): ?>
-          <form id="antwort" class="editor conversation-reply" method="post" action="?<?= h(http_build_query(['id' => $detail['id']] + $groupContext)) ?>#antwort">
+        <?php if (!$closedTicket || !$admin): ?>
+          <form id="antwort" class="editor conversation-reply" method="post" enctype="multipart/form-data" action="?<?= h(http_build_query(['id' => $detail['id']] + $groupContext)) ?>#antwort">
             <?= csrfInput() ?>
-            <label>Antwort<textarea name="comment" rows="4" maxlength="<?= MAX_COMMENT_LENGTH ?>" required><?= h(field($_POST, 'comment')) ?></textarea></label>
-            <button name="action" value="comment">Antwort senden</button>
+            <label><?= $closedTicket ? 'Begründung zum Wiederöffnen' : 'Antwort' ?>
+              <textarea name="comment" rows="4" maxlength="<?= MAX_COMMENT_LENGTH ?>"<?= $closedTicket ? ' required' : '' ?>><?= h(field($_POST, 'comment')) ?></textarea>
+            </label>
+            <label>Dateianhänge<input type="file" name="attachments[]" multiple aria-describedby="attachment-limits"></label>
+            <p class="meta" id="attachment-limits">Bis zu 10 Dateien, je 8 MiB und insgesamt höchstens 16 MiB.</p>
+            <button name="action" value="<?= $closedTicket ? 'reopen' : 'comment' ?>"><?= $closedTicket ? 'Ticket wieder öffnen' : 'Antwort senden' ?></button>
           </form>
         <?php endif ?>
       </section>
@@ -703,6 +831,7 @@ try {
             <thead><tr><th scope="col">Ticket</th><?php if ($admin): ?><th scope="col">Priorität</th><th scope="col">Fällig am</th><?php endif ?><th scope="col">Eingang</th></tr></thead>
             <?php foreach ($statusGroups as $status => $tickets): ?>
             <?php $statusClass = match ($status) {
+                'Wieder geöffnet' => ' status-group-reopened',
                 'In Arbeit' => ' status-group-in-progress',
                 'Wartet' => ' status-group-waiting',
                 'Erledigt' => ' status-group-closed',
