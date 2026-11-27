@@ -477,7 +477,7 @@ try {
                 <?php if ($mailQuote !== ''): ?>
                   <details class="conversation-quote">
                     <summary>Zitierten E-Mail-Verlauf anzeigen</summary>
-                    <div class="conversation-text"><?= h($mailQuote) ?></div>
+                    <div class="conversation-text"><?= h(compactEmailQuote($mailQuote)) ?></div>
                   </details>
                 <?php endif ?>
               </div>

@@ -279,3 +279,9 @@ function replyComment(array $mail): string
     }
     return $quote === '' ? $body : $body . "\n\n" . $quote;
 }
+
+function compactEmailQuote(string $quote): string
+{
+    $quote = preg_replace('/\R(?:\h*\R)+/u', "\n\n", $quote);
+    return preg_replace('/\n\n(?=\h*(?:Von|From|Gesendet|Sent|Datum|Date|An|To|Cc|Betreff|Subject)\h*:)/iu', "\n", $quote);
+}

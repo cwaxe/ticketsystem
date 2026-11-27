@@ -83,6 +83,10 @@ Die Ticketdetailseite zeigt die erste Anfrage und die Antworten chronologisch al
 
 Typische Zitatblöcke aus E-Mail-Antworten erscheinen eingeklappt, auch bei bereits gespeicherten Beiträgen. Dazu gehören Blöcke mit Absender, Versanddatum, Empfänger und Betreff. Adminbenachrichtigungen zu Kundenantworten enthalten den Antworttext.
 
+Das Folgeupdate reduziert Leerzeilen im aufgeklappten E-Mail-Zitat. Zusammengehörige Mail-Kopfzeilen stehen direkt untereinander. Absätze bleiben erhalten. Die Formatierung wird für die Anzeige berechnet und die gespeicherten Kommentare bleiben erhalten.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Kompakter-Mailverlauf.zip`.
+
 ## Installation und Betrieb
 
 - [README.md](README.md) beschreibt Voraussetzungen, Neuinstallation, Update und Bedienung.
