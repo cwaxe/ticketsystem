@@ -9,7 +9,7 @@ const MAX_COMMENT_LENGTH = 4000;
 const MAX_CUSTOMER_NAME_LENGTH = 120;
 const MAX_MAIL_SIGNATURE_LENGTH = 2000;
 const DEFAULT_MAIL_SIGNATURE = 'IT-Service Waxenberger';
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 function emailAddress(string $address): ?string
 {
@@ -88,8 +88,9 @@ function assignTicketCustomer(PDO $db, int $ticket, int $revision, int $customer
 {
     $db->beginTransaction();
     try {
-        $updated = query($db, 'UPDATE tickets SET revision = revision + 1 WHERE id = ? AND revision = ?', [$ticket, $revision]);
-        if ($updated->rowCount() === 0) {
+        $email = query($db, 'UPDATE tickets SET revision = revision + 1 WHERE id = ? AND revision = ? RETURNING email',
+            [$ticket, $revision])->fetchColumn();
+        if ($email === false) {
             $db->rollBack();
             return false;
         }
@@ -102,6 +103,8 @@ function assignTicketCustomer(PDO $db, int $ticket, int $revision, int $customer
         } else {
             query($db, 'INSERT INTO ticket_customers (ticket_id, customer_id) VALUES (?, ?)
                 ON CONFLICT(ticket_id) DO UPDATE SET customer_id = excluded.customer_id', [$ticket, $customer]);
+            query($db, 'INSERT INTO customer_email_assignments (email, customer_id) VALUES (?, ?)
+                ON CONFLICT(email) DO UPDATE SET customer_id = excluded.customer_id', [$email, $customer]);
         }
         $db->commit();
         return true;
@@ -209,6 +212,7 @@ function storeImportedMessage(PDO $db, ?array $mail, string $mailbox, string $va
                     query($db, 'INSERT INTO tickets (email, subject, body, attachment_notice, received_at) VALUES (?, ?, ?, ?, ?)',
                         [$mail['email'], $mail['subject'], $mail['body'], $mail['attachments'], time()]);
                     $ticket = (int) $db->lastInsertId();
+                    query($db, 'INSERT INTO unread_tickets (ticket_id) VALUES (?)', [$ticket]);
                     queueMail($db, $mail['email'], 'customer', $ticket);
                     queueMail($db, $adminEmail, 'admin', $ticket);
                 }

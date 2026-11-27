@@ -85,7 +85,17 @@ Typische Zitatblöcke aus E-Mail-Antworten erscheinen eingeklappt, auch bei bere
 
 Das Folgeupdate reduziert Leerzeilen im aufgeklappten E-Mail-Zitat. Zusammengehörige Mail-Kopfzeilen stehen direkt untereinander. Absätze bleiben erhalten. Die Formatierung wird für die Anzeige berechnet und die gespeicherten Kommentare bleiben erhalten.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Kompakter-Mailverlauf.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Kompakter-Mailverlauf.zip`.
+
+## 10. Bekannte Absender, Statusgruppen und neue Tickets
+
+Eine manuelle Kundenzuordnung merkt sich die genaue Absenderadresse für künftige Tickets. Die Datenbank übernimmt eindeutige frühere Zuordnungen. Bei widersprüchlichen Zuordnungen gilt die nächste manuelle Entscheidung. Ein neuer Kontakt derselben Domain erhält weiterhin nur einen Domain-Hinweis.
+
+Die Ticketlisten sortieren nach Status. Die Verwaltung kann zwischen allen Tickets, der Kundengruppierung und der Ansicht **Neue Tickets** wechseln. Seit dem Update per E-Mail importierte Tickets zählen als neu, bis sie in der Verwaltung geöffnet werden. Antworten in bestehenden Tickets ergänzen die Konversation.
+
+Der lokale Test deckte die Migration, uneindeutige Altzuordnungen, importierte und manuell angelegte Tickets sowie Statusgruppen, Filter und Neu-Markierungen ab.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Kunden-Status-Neue-Tickets.zip`.
 
 ## Installation und Betrieb
 

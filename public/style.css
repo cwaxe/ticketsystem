@@ -57,6 +57,8 @@ button:hover, .button:hover { background: #193e92 }
 .back { display: inline-block; margin-bottom: 14px }
 .listing { overflow: hidden }
 .list-views { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px }
+.ticket-status-group th { background: var(--pale); color: var(--blue) }
+.ticket-new { margin-left: 6px; background: var(--blue); color: var(--white); vertical-align: middle }
 .filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 15px; background: var(--pale) }
 .filters label:first-child { flex: 1 1 230px }
 .filters label:nth-child(2) { flex: 0 1 155px }

@@ -85,12 +85,14 @@ try {
     $filter = field($_GET, 'status');
     $page = max(1, min(100000, (int) field($_GET, 'seite')));
     $grouped = $admin && field($_GET, 'gruppe') === 'kunden';
+    $onlyNew = $admin && !$grouped && field($_GET, 'neu') === '1';
     $customerParam = field($_GET, 'kunde');
     $customerFilter = $grouped && preg_match('/\A[0-9]{1,18}\z/', $customerParam) ? (int) $customerParam : null;
     $customerOverview = $grouped && $customerFilter === null;
     $filters = array_filter(['q' => $search, 'status' => $filter], static fn (string $value): bool => $value !== '');
-    $listParams = $filters + ($grouped ? ['gruppe' => 'kunden'] : []) + ($customerFilter !== null ? ['kunde' => $customerFilter] : []);
-    $groupContext = $grouped ? $listParams + ($page > 1 ? ['seite' => $page] : []) : [];
+    $listParams = $filters + ($grouped ? ['gruppe' => 'kunden'] : []) + ($customerFilter !== null ? ['kunde' => $customerFilter] : [])
+        + ($onlyNew ? ['neu' => 1] : []);
+    $groupContext = $grouped || $onlyNew ? $listParams + ($page > 1 ? ['seite' => $page] : []) : [];
     $db = database();
     $notice = '';
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
@@ -239,6 +241,7 @@ try {
     $detail = null;
     $comments = [];
     $rows = [];
+    $statusGroups = [];
     if ($signatureSettings) {
         $signature = ($action ?? '') === 'save-signature' ? field($_POST, 'signature') : mailSignature($db);
     } elseif ($report) {
@@ -256,6 +259,9 @@ try {
         if ($detail) {
             $comments = query($db, 'SELECT role, body, created_at FROM ticket_comments WHERE ticket_id = ? ORDER BY id', [$id])->fetchAll();
             if ($admin) {
+                if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
+                    query($db, 'DELETE FROM unread_tickets WHERE ticket_id = ?', [$id]);
+                }
                 $assignedCustomer = (int) query($db, 'SELECT customer_id FROM ticket_customers WHERE ticket_id = ?', [$id])->fetchColumn();
                 $customers = query($db, 'SELECT id, name FROM customers ORDER BY name, id')->fetchAll();
                 $domainHint = emailDomain($detail['email']);
@@ -287,6 +293,12 @@ try {
             $where[] = 't.status = ?';
             $parameters[] = $filter;
         }
+        if ($admin) {
+            $unreadCount = (int) query($db, 'SELECT COUNT(*) FROM unread_tickets')->fetchColumn();
+        }
+        if ($onlyNew) {
+            $where[] = 'u.ticket_id IS NOT NULL';
+        }
         if ($customerFilter === 0) {
             $where[] = 'tc.customer_id IS NULL';
             $customerName = 'Ohne Kundenzuordnung';
@@ -302,7 +314,8 @@ try {
         $offset = ($page - 1) * 50;
         $selection = ' FROM tickets t';
         if ($admin) {
-            $selection .= ' LEFT JOIN ticket_customers tc ON tc.ticket_id = t.id LEFT JOIN customers c ON c.id = tc.customer_id';
+            $selection .= ' LEFT JOIN ticket_customers tc ON tc.ticket_id = t.id LEFT JOIN customers c ON c.id = tc.customer_id
+                LEFT JOIN unread_tickets u ON u.ticket_id = t.id';
         }
         $selection .= $where ? ' WHERE ' . implode(' AND ', $where) : '';
         $listing = $customerOverview
@@ -310,8 +323,15 @@ try {
                 COUNT(CASE WHEN t.status <> 'Erledigt' THEN 1 END) AS active, MAX(t.received_at) AS latest" .
                 $selection . ' GROUP BY tc.customer_id, c.name ORDER BY latest DESC, c.name, customer_id'
             : 'SELECT t.id, t.subject, t.email, t.status, t.priority, t.due, t.received_at' .
-                ($admin ? ', c.name AS customer_name' : '') . $selection . ' ORDER BY t.id DESC';
+                ($admin ? ', c.name AS customer_name, u.ticket_id IS NOT NULL AS is_new' : '') . $selection .
+                " ORDER BY CASE t.status WHEN 'Offen' THEN 0 WHEN 'In Arbeit' THEN 1 WHEN 'Wartet' THEN 2 WHEN 'Erledigt' THEN 3 ELSE 4 END, t.status" .
+                ($admin ? ', is_new DESC' : '') . ', t.id DESC';
         $rows = query($db, $listing . ' LIMIT 51 OFFSET ' . $offset, $parameters)->fetchAll();
+        if (!$customerOverview) {
+            foreach (array_slice($rows, 0, 50) as $row) {
+                $statusGroups[$row['status']][] = $row;
+            }
+        }
     }
 } catch (RuntimeException $error) {
     http_response_code(503);
@@ -328,7 +348,7 @@ try {
   <link rel="icon" type="image/png" sizes="150x150" href="favicon-150.png">
   <link rel="icon" type="image/png" sizes="300x300" href="favicon-300.png">
   <link rel="apple-touch-icon" href="favicon-300.png">
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
   <?php if ($showLink): ?><script src="signin.js" defer></script><?php endif ?>
 </head>
 <body>
@@ -555,7 +575,8 @@ try {
   <?php else: ?>
     <?php if ($admin): ?>
       <nav class="list-views" aria-label="Ansicht der Ticketübersicht">
-        <a class="button<?= $grouped ? ' secondary' : '' ?>" href="?<?= h(http_build_query($filters)) ?>"<?= $grouped ? '' : ' aria-current="page"' ?>>Alle Tickets</a>
+        <a class="button<?= $grouped || $onlyNew ? ' secondary' : '' ?>" href="?<?= h(http_build_query($filters)) ?>"<?= !$grouped && !$onlyNew ? ' aria-current="page"' : '' ?>>Alle Tickets</a>
+        <a class="button<?= $onlyNew ? '' : ' secondary' ?>" href="?neu=1"<?= $onlyNew ? ' aria-current="page"' : '' ?>>Neue Tickets (<?= h($unreadCount) ?>)</a>
         <a class="button<?= $grouped ? '' : ' secondary' ?>" href="?<?= h(http_build_query($filters + ['gruppe' => 'kunden'])) ?>"<?= $customerOverview ? ' aria-current="page"' : '' ?>>Nach Kunden gruppieren</a>
       </nav>
     <?php endif ?>
@@ -572,9 +593,10 @@ try {
         <?php if ($admin): ?><a class="button secondary" href="?new=1">Neues Ticket</a><?php endif ?>
         <?php if ($grouped): ?><input type="hidden" name="gruppe" value="kunden"><?php endif ?>
         <?php if ($customerFilter !== null): ?><input type="hidden" name="kunde" value="<?= h($customerFilter) ?>"><?php endif ?>
+        <?php if ($onlyNew): ?><input type="hidden" name="neu" value="1"><?php endif ?>
       </form>
       <?php if (!$rows): ?>
-        <p class="empty">Keine passenden Tickets vorhanden.</p>
+        <p class="empty"><?= $onlyNew ? 'Keine passenden neuen Tickets vorhanden.' : 'Keine passenden Tickets vorhanden.' ?></p>
       <?php elseif ($customerOverview): ?>
         <div class="table-wrap">
           <table>
@@ -594,15 +616,17 @@ try {
       <?php else: ?>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Ticket</th><th>Status</th><?php if ($admin): ?><th>Priorität</th><th>Fällig am</th><?php endif ?><th>Eingang</th></tr></thead>
+            <thead><tr><th scope="col">Ticket</th><?php if ($admin): ?><th scope="col">Priorität</th><th scope="col">Fällig am</th><?php endif ?><th scope="col">Eingang</th></tr></thead>
+            <?php foreach ($statusGroups as $status => $tickets): ?>
             <tbody>
-            <?php foreach (array_slice($rows, 0, 50) as $row): ?>
+              <tr class="ticket-status-group"><th scope="rowgroup" colspan="<?= $admin ? 4 : 2 ?>"><?= h($status) ?></th></tr>
+            <?php foreach ($tickets as $row): ?>
               <tr>
                 <td><a href="?<?= h(http_build_query(['id' => $row['id']] + $groupContext)) ?>"><?= h($row['subject']) ?></a>
+                  <?php if ($admin && $row['is_new']): ?><span class="badge ticket-new">Neu</span><?php endif ?>
                   <small><?= h(ticketCode((int) $row['id'])) ?><?= $admin ? ' · ' . h($row['email']) : '' ?></small>
                   <?php if ($admin && $row['customer_name'] !== null): ?><small><?= h($row['customer_name']) ?></small><?php endif ?>
                 </td>
-                <td><span class="badge"><?= h($row['status']) ?></span></td>
                 <?php if ($admin): ?>
                   <td><?= h($row['priority']) ?></td>
                   <td class="<?= $row['due'] !== '' && $row['due'] < date('Y-m-d') && $row['status'] !== 'Erledigt' ? 'overdue' : '' ?>"><?= $row['due'] ? h(date('d.m.Y', strtotime($row['due']))) : '–' ?></td>
@@ -611,6 +635,7 @@ try {
               </tr>
             <?php endforeach ?>
             </tbody>
+            <?php endforeach ?>
           </table>
         </div>
       <?php endif ?>

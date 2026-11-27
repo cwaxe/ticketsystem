@@ -117,5 +117,28 @@ CREATE TABLE IF NOT EXISTS mail_settings (
     signature TEXT NOT NULL
 );
 
-PRAGMA user_version = 5;
+CREATE TABLE IF NOT EXISTS customer_email_assignments (
+    email TEXT PRIMARY KEY NOT NULL,
+    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE
+);
+INSERT INTO customer_email_assignments (email, customer_id)
+SELECT t.email, MIN(tc.customer_id)
+FROM tickets t JOIN ticket_customers tc ON tc.ticket_id = t.id
+WHERE (SELECT user_version FROM pragma_user_version) < 6
+GROUP BY t.email
+HAVING COUNT(DISTINCT tc.customer_id) = 1
+ON CONFLICT(email) DO NOTHING;
+
+CREATE TRIGGER IF NOT EXISTS ticket_assign_known_email
+AFTER INSERT ON tickets
+BEGIN
+    INSERT INTO ticket_customers (ticket_id, customer_id)
+    SELECT NEW.id, customer_id FROM customer_email_assignments WHERE email = NEW.email;
+END;
+
+CREATE TABLE IF NOT EXISTS unread_tickets (
+    ticket_id INTEGER PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE
+);
+
+PRAGMA user_version = 6;
 COMMIT;
