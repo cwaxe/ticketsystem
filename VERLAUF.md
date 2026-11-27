@@ -113,7 +113,17 @@ Erledigte Tickets zeigen einen grünen Ticketkopf und ein Abzeichen mit Haken. E
 
 Der lokale Test prüfte abgeschlossene, ältere und wieder geöffnete Tickets sowie die Rollen und das Bearbeitungsformular.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Erledigt.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Erledigt.zip`.
+
+## 13. Gemeinsame Ticketansicht und Statusverlauf
+
+Die Verwaltung sieht Status, Priorität und Fälligkeit dauerhaft oberhalb der Konversation. Kundenzuordnung und interne Notiz lassen sich separat öffnen. Das Löschen eines Tickets erfolgt weiterhin nach Bestätigung.
+
+Die Konversation enthält die erste Anfrage, alle Antworten und die Statuswechsel in chronologischer Reihenfolge. Neue Wechsel speichern Zeitpunkt, alten und neuen Status sowie die Rolle. Der Abschluss erscheint mit grünem Haken. Beim Update werden vorhandene Abschlussdaten übernommen. Frühere Statuswechsel ohne gespeicherte Historie können nicht ergänzt werden.
+
+Die lokalen Portaltests prüften Migration, Verwaltungsfelder, Kundensicht, Statuswechsel in beiden Rollen, Wiederöffnen, alte Abschlussdaten und den Fortbestand der Historie nach Versand der Benachrichtigungen.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Statusverlauf.zip`.
 
 ## Installation und Betrieb
 

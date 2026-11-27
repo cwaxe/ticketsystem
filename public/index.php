@@ -239,7 +239,7 @@ try {
     $id = (int) field($_GET, 'id');
     $new = $admin && field($_GET, 'new') === '1';
     $detail = null;
-    $comments = [];
+    $conversation = [];
     $rows = [];
     $statusGroups = [];
     if ($signatureSettings) {
@@ -258,13 +258,18 @@ try {
         $detail = query($db, 'SELECT t.*, c.closed_at FROM tickets t LEFT JOIN ticket_closures c ON c.ticket_id = t.id
             WHERE t.id = ?' . ($admin ? '' : ' AND t.email = ?'), $parameters)->fetch();
         if ($detail) {
-            $comments = query($db, 'SELECT role, body, created_at FROM ticket_comments WHERE ticket_id = ? ORDER BY id', [$id])->fetchAll();
+            $conversation = query($db, 'SELECT role, body, created_at, id, NULL AS old_status, NULL AS new_status, 0 AS status_event
+                FROM ticket_comments WHERE ticket_id = ?
+                UNION ALL
+                SELECT role, NULL, created_at, id, old_status, new_status, 1
+                FROM ticket_status_history WHERE ticket_id = ?
+                ORDER BY created_at, status_event, id', [$id, $id])->fetchAll();
             if ($admin) {
                 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
                     query($db, 'DELETE FROM unread_tickets WHERE ticket_id = ?', [$id]);
                 }
                 $assignedCustomer = (int) query($db, 'SELECT customer_id FROM ticket_customers WHERE ticket_id = ?', [$id])->fetchColumn();
-                $customers = query($db, 'SELECT id, name FROM customers ORDER BY name, id')->fetchAll();
+                $customers = query($db, 'SELECT id, name FROM customers ORDER BY name, id')->fetchAll(PDO::FETCH_KEY_PAIR);
                 $domainHint = emailDomain($detail['email']);
                 $suggestions = [];
                 if ($domainHint !== '') {
@@ -349,7 +354,7 @@ try {
   <link rel="icon" type="image/png" sizes="150x150" href="favicon-150.png">
   <link rel="icon" type="image/png" sizes="300x300" href="favicon-300.png">
   <link rel="apple-touch-icon" href="favicon-300.png">
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=9">
   <?php if ($showLink): ?><script src="signin.js" defer></script><?php endif ?>
 </head>
 <body>
@@ -478,81 +483,85 @@ try {
         <?php endif ?>
       </header>
     <?php endif ?>
+    <div class="panel detail ticket-workspace<?= $detail ? ' ticket-workspace-thread' : '' ?>">
     <?php if ($admin): ?>
+      <?php if (!$detail): ?><h2>Neues Ticket</h2><?php endif ?>
+      <form id="ticket-editor" class="editor<?= $detail ? ' ticket-editor' : '' ?>" method="post">
+        <?= csrfInput() ?><input type="hidden" name="id" value="<?= h($detail['id'] ?? 0) ?>"><input type="hidden" name="revision" value="<?= h($detail['revision'] ?? 0) ?>">
+        <?php if ($new): ?>
+          <label>E-Mail-Adresse des Kunden<input required type="email" name="email" maxlength="254" value="<?= h(field($_POST, 'email')) ?>"></label>
+          <label>Betreff<input required name="subject" maxlength="180" value="<?= h(field($_POST, 'subject')) ?>"></label>
+          <label>Beschreibung<textarea rows="5" name="body" maxlength="24000"><?= h(field($_POST, 'body')) ?></textarea></label>
+        <?php endif ?>
+        <div class="form-grid<?= $detail ? ' ticket-fields' : '' ?>">
+          <label>Status<?php enumSelect('status', STATUSES, $detail['status'] ?? field($_POST, 'status')) ?></label>
+          <label>Priorität<?php enumSelect('priority', PRIORITIES, $detail['priority'] ?? (field($_POST, 'priority') ?: 'Normal')) ?></label>
+          <label>Fälligkeit<input type="date" name="due" value="<?= h($detail['due'] ?? field($_POST, 'due')) ?>"></label>
+          <?php if ($detail): ?><button name="action" value="save">Änderungen speichern</button><?php endif ?>
+        </div>
+        <?php if (!$detail): ?>
+          <label>Interne Notiz<textarea rows="4" name="notes" maxlength="24000"><?= h(field($_POST, 'notes')) ?></textarea></label>
+          <button name="action" value="save">Ticket erstellen</button>
+        <?php endif ?>
+      </form>
       <?php if ($detail): ?>
-        <details class="panel detail ticket-tools"<?= $notice !== '' && in_array($action ?? '', ['assign-customer', 'save', 'delete'], true) ? ' open' : '' ?>>
-          <summary>Ticket bearbeiten</summary>
-      <?php else: ?>
-        <article class="panel detail">
-          <h2>Neues Ticket</h2>
-      <?php endif ?>
-        <?php if ($detail): ?>
-          <section class="customer-assignment" aria-labelledby="customer-assignment-title">
-            <h2 id="customer-assignment-title">Kundenzuordnung</h2>
+        <div class="ticket-extras">
+          <details class="customer-assignment"<?= $notice !== '' && ($action ?? '') === 'assign-customer' ? ' open' : '' ?>>
+            <summary><span>Kundenzuordnung</span><small><?= h($customers[$assignedCustomer] ?? 'Ohne Kundenzuordnung') ?></small></summary>
             <?php if ($domainHint !== ''): ?>
               <p class="meta">Domain-Hinweis: @<?= h($domainHint) ?><?= $suggestions ? ' · Passende Kunden aus früheren Zuordnungen: ' . h(implode(', ', $suggestions)) : '' ?></p>
             <?php endif ?>
             <form class="editor" method="post">
               <?= csrfInput() ?><input type="hidden" name="revision" value="<?= h($detail['revision']) ?>">
-              <div class="form-grid">
-                <label>Kunde<select name="customer_id">
-                  <option value="0">Ohne Kundenzuordnung</option>
-                  <?php foreach ($customers as $customer): ?>
-                    <option value="<?= h($customer['id']) ?>"<?= (int) $customer['id'] === $assignedCustomer ? ' selected' : '' ?>><?= h($customer['name']) ?></option>
-                  <?php endforeach ?>
-                </select></label>
-                <label>Oder neuen Kunden anlegen und zuordnen<input name="new_customer" maxlength="<?= MAX_CUSTOMER_NAME_LENGTH ?>" value="<?= h(field($_POST, 'new_customer')) ?>"></label>
-              </div>
+              <label>Kunde<select name="customer_id">
+                <option value="0">Ohne Kundenzuordnung</option>
+                <?php foreach ($customers as $customerId => $customerName): ?>
+                  <option value="<?= h($customerId) ?>"<?= (int) $customerId === $assignedCustomer ? ' selected' : '' ?>><?= h($customerName) ?></option>
+                <?php endforeach ?>
+              </select></label>
+              <label>Oder neuen Kunden anlegen und zuordnen<input name="new_customer" maxlength="<?= MAX_CUSTOMER_NAME_LENGTH ?>" value="<?= h(field($_POST, 'new_customer')) ?>"></label>
               <button class="secondary" name="action" value="assign-customer">Zuordnung speichern</button>
             </form>
-          </section>
-        <?php endif ?>
-        <form class="editor" method="post">
-          <?= csrfInput() ?><input type="hidden" name="id" value="<?= h($detail['id'] ?? 0) ?>"><input type="hidden" name="revision" value="<?= h($detail['revision'] ?? 0) ?>">
-          <?php if ($new): ?>
-            <label>E-Mail-Adresse des Kunden<input required type="email" name="email" maxlength="254" value="<?= h(field($_POST, 'email')) ?>"></label>
-            <label>Betreff<input required name="subject" maxlength="180" value="<?= h(field($_POST, 'subject')) ?>"></label>
-            <label>Beschreibung<textarea rows="5" name="body" maxlength="24000"><?= h(field($_POST, 'body')) ?></textarea></label>
-          <?php endif ?>
-          <div class="form-grid">
-            <label>Status<?php enumSelect('status', STATUSES, $detail['status'] ?? field($_POST, 'status')) ?></label>
-            <label>Priorität<?php enumSelect('priority', PRIORITIES, $detail['priority'] ?? (field($_POST, 'priority') ?: 'Normal')) ?></label>
-            <label>Fällig am<input type="date" name="due" value="<?= h($detail['due'] ?? field($_POST, 'due')) ?>"></label>
-          </div>
-          <label>Interne Notizen<textarea rows="4" name="notes" maxlength="24000"><?= h($detail['notes'] ?? field($_POST, 'notes')) ?></textarea></label>
-          <button name="action" value="save"><?= $new ? 'Ticket erstellen' : 'Änderungen speichern' ?></button>
-        </form>
-        <?php if ($detail): ?>
-          <details class="delete">
-            <summary>Ticket löschen</summary>
-            <form method="post">
-              <?= csrfInput() ?><input type="hidden" name="id" value="<?= h($detail['id']) ?>"><input type="hidden" name="revision" value="<?= h($detail['revision']) ?>">
-              <p>Das Ticket wird endgültig aus dem Portal gelöscht.</p><button class="danger" name="action" value="delete">Endgültig löschen</button>
-            </form>
           </details>
-        <?php endif ?>
-      <?php if ($detail): ?>
-        </details>
-      <?php else: ?>
-        </article>
+          <details<?= $notice !== '' && ($action ?? '') === 'save' ? ' open' : '' ?>>
+            <summary>Interne Notiz</summary>
+            <label class="editor">Notiztext<textarea form="ticket-editor" rows="4" name="notes" maxlength="24000"><?= h($detail['notes']) ?></textarea></label>
+          </details>
+        </div>
       <?php endif ?>
     <?php endif ?>
     <?php if ($detail): ?>
-      <section id="kommentare" class="panel detail conversation" aria-labelledby="conversation-title">
+      <section id="kommentare" class="conversation<?= $admin ? ' conversation-with-editor' : '' ?>" aria-labelledby="conversation-title">
         <h2 id="conversation-title">Konversation</h2>
         <?php $entries = array_merge([[
             'role' => 'customer',
             'created_at' => $detail['received_at'],
             'body' => $detail['body'] !== '' ? $detail['body'] : 'Die E-Mail enthält keinen übernommenen Nachrichtentext.',
-        ]], $comments); ?>
+        ]], $conversation); ?>
         <ol class="conversation-list">
           <?php foreach ($entries as $position => $entry): ?>
+            <?php
+            $timestamp = (int) $entry['created_at'];
+            ?>
+            <?php if (!empty($entry['status_event'])): ?>
+              <li class="conversation-event<?= $entry['new_status'] === 'Erledigt' ? ' conversation-event-closed' : '' ?>">
+                <div class="conversation-event-label">
+                  <?php if ($entry['new_status'] === 'Erledigt'): ?><span class="ticket-closed-check" aria-hidden="true"></span><?php endif ?>
+                  <time datetime="<?= h(date(DATE_ATOM, $timestamp)) ?>"><?= h(date('d.m.Y, H:i', $timestamp)) ?></time>
+                  <?php if ($entry['old_status'] !== null): ?>
+                    <span><?= $entry['role'] === 'customer' ? 'Kunde' : 'IT-Service' ?>: <?= h($entry['old_status']) ?> → <strong><?= h($entry['new_status']) ?></strong></span>
+                  <?php else: ?>
+                    <strong>Ticket abgeschlossen</strong>
+                  <?php endif ?>
+                </div>
+              </li>
+              <?php continue; ?>
+            <?php endif ?>
             <?php
             $fromService = $entry['role'] === 'admin';
             [$messageText, $mailQuote] = !$fromService && $position > 0
                 ? splitQuotedReply($entry['body'])
                 : [$entry['body'], ''];
-            $timestamp = (int) $entry['created_at'];
             ?>
             <li class="conversation-entry<?= $fromService ? ' conversation-entry-service' : '' ?>">
               <p class="conversation-byline"><strong><?= $fromService ? 'IT-Service' : 'Kunde' ?></strong>
@@ -580,7 +589,23 @@ try {
           </form>
         <?php endif ?>
       </section>
+      <?php if ($admin): ?>
+        <?php $ticketUrl = '?' . http_build_query(['id' => $detail['id']] + $groupContext); ?>
+        <div class="delete">
+          <?php if (field($_GET, 'loeschen') === '1'): ?>
+            <p>Das Ticket wird endgültig aus dem Portal gelöscht.</p>
+            <form method="post" class="ticket-delete-actions">
+              <?= csrfInput() ?><input type="hidden" name="id" value="<?= h($detail['id']) ?>"><input type="hidden" name="revision" value="<?= h($detail['revision']) ?>">
+              <button class="danger" name="action" value="delete">Endgültig löschen</button>
+              <a class="button secondary" href="<?= h($ticketUrl) ?>">Abbrechen</a>
+            </form>
+          <?php else: ?>
+            <a href="<?= h($ticketUrl . '&loeschen=1') ?>">Ticket löschen</a>
+          <?php endif ?>
+        </div>
+      <?php endif ?>
     <?php endif ?>
+    </div>
   <?php else: ?>
     <?php if ($admin): ?>
       <nav class="list-views" aria-label="Ansicht der Ticketübersicht">

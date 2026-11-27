@@ -133,7 +133,16 @@ td small { display: block; margin-top: 2px }
     border-width: 0 0 2px 2px;
     transform: translateY(-1px) rotate(-45deg);
 }
-.conversation, .ticket-tools { margin-top: 16px }
+.ticket-workspace-thread { margin-top: 16px }
+.ticket-editor { margin-top: 0 }
+.form-grid.ticket-fields { grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 16px; align-items: end }
+.ticket-fields button { justify-self: end; max-width: 100% }
+.ticket-extras { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 14px; margin-top: 16px }
+.ticket-extras details { min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: #f8faff }
+.ticket-extras summary { cursor: pointer; font-size: 14px; font-weight: bold; overflow-wrap: anywhere }
+.ticket-extras summary small { float: right; max-width: 55%; margin-left: 8px; font-weight: normal; text-align: right }
+.ticket-extras details > .editor, .ticket-extras details > .meta { margin-top: 12px }
+.conversation-with-editor { border-top: 1px solid var(--line); padding-top: 18px; margin-top: 18px }
 .conversation-list { list-style: none; display: grid; gap: 16px; padding: 0; margin: 16px 0 0 }
 .conversation-entry { display: grid; justify-items: start; min-width: 0 }
 .conversation-entry-service { justify-items: end }
@@ -151,13 +160,19 @@ td small { display: block; margin-top: 2px }
 .conversation-text { color: #18284b; white-space: pre-wrap; overflow-wrap: anywhere }
 .conversation-attachment { margin: 7px 0 0; font-size: 13px; color: var(--text) }
 .conversation-quote { margin-top: 9px; font-size: 13px; color: var(--text) }
-.conversation-quote summary, .ticket-tools > summary { cursor: pointer }
+.conversation-quote summary { cursor: pointer }
 .conversation-quote .conversation-text { margin-top: 7px; padding-left: 9px; border-left: 2px solid var(--line) }
 .conversation-reply { border-top: 1px solid var(--line); padding-top: 16px; scroll-margin-top: 12px }
-.ticket-tools > summary { font-weight: bold }
-.customer-assignment { margin: 20px 0; padding: 14px; border: 1px solid var(--line); border-radius: 6px }
-.customer-assignment p { overflow-wrap: anywhere }
-.customer-assignment .editor { margin-top: 12px }
+.conversation-event { display: flex; justify-content: center; align-items: center; gap: 8px; color: var(--text) }
+.conversation-event::before, .conversation-event::after { content: ""; flex: 1; border-top: 1px solid var(--line) }
+.conversation-event-label {
+    display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 4px 9px;
+    padding: 5px 13px; border: 1px solid var(--line); border-radius: 16px; background: #f3f6fb; font-size: 13px;
+}
+.conversation-event-closed .conversation-event-label { color: #15583a; background: #e7f5eb; border-color: #c5e1ce }
+.conversation-event-closed::before, .conversation-event-closed::after { border-color: #c5e1ce }
+.conversation-event .ticket-closed-check { width: 17px; height: 17px }
+.conversation-event .ticket-closed-check::before { width: 6px; height: 3px }
 .report-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 16px 0 }
 .report-stats div { padding: 12px; background: var(--pale); border-radius: 4px }
 .report-stats dt { font-size: 14px }
@@ -165,14 +180,15 @@ td small { display: block; margin-top: 2px }
 .editor { display: grid; gap: 13px; margin-top: 19px }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px }
 .delete { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 12px }
-.delete summary { cursor: pointer }
-.delete form { padding-top: 10px }
+.ticket-delete-actions { display: flex; flex-wrap: wrap; gap: 8px }
 .danger { background: #9c2c39; border-color: #9c2c39 }
 .danger:hover { background: #7d242e }
 .site-footer { margin-top: auto; padding: 18px 0; font-size: 13px; border-top: 1px solid var(--line); color: var(--text); background: white }
 .footer-content { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 18px }
 .footer-content nav { display: flex; flex-wrap: wrap; gap: 6px 16px }
 @media (max-width: 650px) {
+    .ticket-extras { grid-template-columns: minmax(0, 1fr) }
+    .ticket-fields button { justify-self: start }
     .portal-options { grid-template-columns: 1fr }
 }
 @media (max-width: 520px) {

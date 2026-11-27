@@ -140,5 +140,35 @@ CREATE TABLE IF NOT EXISTS unread_tickets (
     ticket_id INTEGER PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE
 );
 
-PRAGMA user_version = 6;
+CREATE TABLE IF NOT EXISTS ticket_status_history (
+    id INTEGER PRIMARY KEY,
+    ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+    old_status TEXT,
+    new_status TEXT NOT NULL,
+    role TEXT CHECK (role IN ('admin', 'customer')),
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ticket_status_history_ticket ON ticket_status_history(ticket_id, id);
+
+INSERT INTO ticket_status_history (ticket_id, new_status, created_at)
+SELECT ticket_id, 'Erledigt', closed_at FROM ticket_closures
+WHERE (SELECT user_version FROM pragma_user_version) < 7;
+
+CREATE TRIGGER IF NOT EXISTS ticket_record_status_change
+AFTER UPDATE OF status ON tickets
+WHEN OLD.status <> NEW.status
+BEGIN
+    INSERT INTO ticket_status_history (ticket_id, old_status, new_status, role, created_at)
+    VALUES (NEW.id, OLD.status, NEW.status, 'admin', CAST(strftime('%s', 'now') AS INTEGER));
+END;
+
+CREATE TRIGGER IF NOT EXISTS ticket_record_initial_closure
+AFTER INSERT ON tickets
+WHEN NEW.status = 'Erledigt'
+BEGIN
+    INSERT INTO ticket_status_history (ticket_id, new_status, created_at)
+    VALUES (NEW.id, NEW.status, NEW.received_at);
+END;
+
+PRAGMA user_version = 7;
 COMMIT;

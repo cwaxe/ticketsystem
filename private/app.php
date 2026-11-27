@@ -9,7 +9,7 @@ const MAX_COMMENT_LENGTH = 4000;
 const MAX_CUSTOMER_NAME_LENGTH = 120;
 const MAX_MAIL_SIGNATURE_LENGTH = 2000;
 const DEFAULT_MAIL_SIGNATURE = 'IT-Service Waxenberger';
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 function emailAddress(string $address): ?string
 {
@@ -160,6 +160,8 @@ function closeCustomerTicket(PDO $db, int $ticket, string $owner, string $adminE
             WHERE id = ? AND email = ? AND status <> 'Erledigt' RETURNING status", [$ticket, $owner])->fetchColumn();
         if ($priorStatus !== false) {
             query($db, "UPDATE tickets SET status = 'Erledigt' WHERE id = ?", [$ticket]);
+            query($db, "UPDATE ticket_status_history SET role = 'customer' WHERE id = (
+                SELECT MAX(id) FROM ticket_status_history WHERE ticket_id = ?)", [$ticket]);
             $outboxId = queueMail($db, $adminEmail, 'admin', $ticket);
             query($db, "INSERT INTO status_notifications (outbox_id, old_status, new_status) VALUES (?, ?, 'Erledigt')",
                 [$outboxId, $priorStatus]);
