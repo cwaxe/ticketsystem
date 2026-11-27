@@ -225,7 +225,7 @@ function outboxMessage(PDO $db, array $config, array $row): array
         $ticket = (int) $row['ticket_id'];
         $code = ticketCode($ticket);
         $admin = $row['role'] === 'admin';
-        if ($comment !== null) {
+        if ($newStatus === null) {
             if ($admin) {
                 [$comment] = splitQuotedReply($comment);
                 $comment = $comment !== '' ? $comment : 'Die E-Mail enthält keinen übernommenen Antworttext.';
@@ -238,6 +238,9 @@ function outboxMessage(PDO $db, array $config, array $row): array
             $change = 'von „' . $row['old_status'] . '“ auf „' . $newStatus . '“';
             $intro = $admin ? 'Der Kunde hat Ticket ' . $code . ' geschlossen. Der Status wechselte ' . $change . '.'
                 : 'Der Status Ihres Tickets ' . $code . ' wurde ' . $change . ' geändert.';
+            if ($comment !== null) {
+                $intro .= "\n\nKommentar zur Statusänderung:\n" . $comment;
+            }
         }
         $reply = $admin ? '' : "\n\nSie können direkt auf diese E-Mail antworten. Ihre Antwort wird dem Ticket zugeordnet.";
         return [

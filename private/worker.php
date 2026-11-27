@@ -93,7 +93,7 @@ function printMailStatus(PDO $db): void
         (SELECT COUNT(*) FROM imported_mail) AS imported,
         COUNT(*) AS queued,
         COUNT(CASE WHEN role = \'customer\' AND ticket_id IS NOT NULL AND n.outbox_id IS NULL AND s.outbox_id IS NULL THEN 1 END) AS confirmations,
-        COUNT(CASE WHEN role = \'customer\' THEN n.outbox_id END) AS comment_notifications,
+        COUNT(CASE WHEN role = \'customer\' AND s.outbox_id IS NULL THEN n.outbox_id END) AS comment_notifications,
         COUNT(CASE WHEN role = \'customer\' THEN s.outbox_id END) AS status_notifications,
         COUNT(CASE WHEN role = \'admin\' AND ticket_id IS NOT NULL AND n.outbox_id IS NULL AND s.outbox_id IS NULL THEN 1 END) AS admin_alerts,
         COUNT(CASE WHEN role = \'admin\' AND (n.outbox_id IS NOT NULL OR s.outbox_id IS NOT NULL) THEN 1 END) AS admin_updates,

@@ -206,18 +206,23 @@ try {
                 $priority = field($_POST, 'priority');
                 $due = field($_POST, 'due');
                 $notes = trim(field($_POST, 'notes'));
+                $statusComment = trim(field($_POST, 'status_comment'));
                 $validDue = $due === '' || (preg_match('/\A[0-9]{4}-[0-9]{2}-[0-9]{2}\z/', $due) &&
                     checkdate((int) substr($due, 5, 2), (int) substr($due, 8, 2), (int) substr($due, 0, 4)));
                 if (!in_array($status, STATUSES, true) || !in_array($priority, PRIORITIES, true) ||
                     !$validDue || strlen($notes) > MAX_TICKET_LENGTH * 4) {
                     $notice = 'Bitte prüfen Sie Status, Priorität, Datum und Notizen.';
+                } elseif ($id > 0 && (strlen($statusComment) > MAX_COMMENT_LENGTH * 4 ||
+                    !preg_match('/\A[^\x00]{0,' . MAX_COMMENT_LENGTH . '}\z/u', $statusComment))) {
+                    $notice = 'Bitte geben Sie einen Statuskommentar mit höchstens ' . MAX_COMMENT_LENGTH . ' Zeichen ein.';
                 } elseif ($id > 0) {
-                    $update = query($db, 'UPDATE tickets SET status = ?, priority = ?, due = ?, notes = ?, revision = revision + 1
-                        WHERE id = ? AND revision = ?', [$status, $priority, $due, $notes, $id, $revision]);
-                    if ($update->rowCount() > 0) {
+                    $result = saveAdminTicket($db, $id, $revision, [$status, $priority, $due, $notes], $statusComment);
+                    if ($result === 'saved') {
                         go($config, '?' . http_build_query(['id' => $id, 'saved' => 1] + $groupContext));
                     }
-                    $notice = 'Das Ticket wurde zwischenzeitlich geändert oder gelöscht. Die aktuellen Daten wurden geladen.';
+                    $notice = $result === 'status-unchanged'
+                        ? 'Bitte wählen Sie für den Statuskommentar einen anderen Status.'
+                        : 'Das Ticket wurde zwischenzeitlich geändert oder gelöscht. Die aktuellen Daten wurden geladen.';
                 } else {
                     $email = emailAddress(field($_POST, 'email'));
                     $subject = trim(field($_POST, 'subject'));
@@ -263,7 +268,7 @@ try {
                 UNION ALL
                 SELECT role, NULL, created_at, id, old_status, new_status, 1
                 FROM ticket_status_history WHERE ticket_id = ?
-                ORDER BY created_at, status_event, id', [$id, $id])->fetchAll();
+                ORDER BY created_at, status_event DESC, id', [$id, $id])->fetchAll();
             if ($admin) {
                 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
                     query($db, 'DELETE FROM unread_tickets WHERE ticket_id = ?', [$id]);
@@ -354,7 +359,7 @@ try {
   <link rel="icon" type="image/png" sizes="150x150" href="favicon-150.png">
   <link rel="icon" type="image/png" sizes="300x300" href="favicon-300.png">
   <link rel="apple-touch-icon" href="favicon-300.png">
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=10">
   <?php if ($showLink): ?><script src="signin.js" defer></script><?php endif ?>
 </head>
 <body>
@@ -499,7 +504,12 @@ try {
           <label>Fälligkeit<input type="date" name="due" value="<?= h($detail['due'] ?? field($_POST, 'due')) ?>"></label>
           <?php if ($detail): ?><button name="action" value="save">Änderungen speichern</button><?php endif ?>
         </div>
-        <?php if (!$detail): ?>
+        <?php if ($detail): ?>
+          <label>Kommentar zur Statusänderung (optional)
+            <textarea name="status_comment" rows="3" maxlength="<?= MAX_COMMENT_LENGTH ?>" aria-describedby="status-comment-help"><?= h(field($_POST, 'status_comment')) ?></textarea>
+          </label>
+          <p id="status-comment-help" class="meta">Der Kunde erhält den Kommentar zusammen mit der Statusänderung per E-Mail.</p>
+        <?php else: ?>
           <label>Interne Notiz<textarea rows="4" name="notes" maxlength="24000"><?= h(field($_POST, 'notes')) ?></textarea></label>
           <button name="action" value="save">Ticket erstellen</button>
         <?php endif ?>

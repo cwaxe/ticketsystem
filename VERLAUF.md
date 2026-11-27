@@ -123,7 +123,15 @@ Die Konversation enthält die erste Anfrage, alle Antworten und die Statuswechse
 
 Die lokalen Portaltests prüften Migration, Verwaltungsfelder, Kundensicht, Statuswechsel in beiden Rollen, Wiederöffnen, alte Abschlussdaten und den Fortbestand der Historie nach Versand der Benachrichtigungen.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Statusverlauf.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Statusverlauf.zip`.
+
+## 14. Kundenkommentar beim Statuswechsel und sichtbare Neu-Markierung
+
+Die Verwaltung kann beim Speichern einer Statusänderung einen optionalen Kundenkommentar angeben. Der Kunde erhält den Kommentar in derselben Statusmail. Der Beitrag erscheint auch in der Konversation. Status, Kommentar und Versandauftrag werden gemeinsam gespeichert.
+
+Die Kennzeichnung **Neu** in der Ticketübersicht verwendet dunkelblauen Hintergrund und weiße Schrift.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Statuskommentar.zip`.
 
 ## Installation und Betrieb
 

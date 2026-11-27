@@ -152,6 +152,39 @@ function addPortalComment(PDO $db, int $ticket, array $user, string $body, strin
     }
 }
 
+function saveAdminTicket(PDO $db, int $ticket, int $revision, array $fields, string $comment): string
+{
+    [$status, $priority, $due, $notes] = $fields;
+    $db->beginTransaction();
+    try {
+        $updated = query($db, "UPDATE tickets SET status = ?, priority = ?, due = ?, notes = ?, revision = revision + 1
+            WHERE id = ? AND revision = ? AND (? = '' OR status <> ?)",
+            [$status, $priority, $due, $notes, $ticket, $revision, $comment, $status]);
+        if ($updated->rowCount() === 0) {
+            $current = query($db, 'SELECT 1 FROM tickets WHERE id = ? AND revision = ?', [$ticket, $revision])->fetchColumn();
+            $db->rollBack();
+            return $current ? 'status-unchanged' : 'stale';
+        }
+        if ($comment !== '') {
+            // The status trigger queues the customer mail within this transaction.
+            $notice = query($db, "SELECT o.id, o.created_at FROM outbox o JOIN status_notifications s ON s.outbox_id = o.id
+                WHERE o.ticket_id = ? AND o.role = 'customer' ORDER BY o.id DESC LIMIT 1", [$ticket])->fetch();
+            if (!$notice) {
+                throw new RuntimeException('Die Statusbenachrichtigung konnte nicht eingereiht werden.');
+            }
+            query($db, "INSERT INTO ticket_comments (ticket_id, role, body, created_at) VALUES (?, 'admin', ?, ?)",
+                [$ticket, $comment, $notice['created_at']]);
+            $commentId = (int) $db->lastInsertId();
+            query($db, 'INSERT INTO comment_notifications (outbox_id, comment_id) VALUES (?, ?)', [$notice['id'], $commentId]);
+        }
+        $db->commit();
+        return 'saved';
+    } catch (Throwable $error) {
+        $db->rollBack();
+        throw $error;
+    }
+}
+
 function closeCustomerTicket(PDO $db, int $ticket, string $owner, string $adminEmail): bool
 {
     $db->beginTransaction();
