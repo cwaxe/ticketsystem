@@ -189,6 +189,12 @@ Der Integrationstest verwendet ein lokales Git-Repository und prüft Versionserk
 
 Paket: `Waxenberger-Ticketportal-Vollpaket-v1.0.0.zip`.
 
+## 22. Version 1.0.1 mit eigener Einstellungsseite
+
+Die Verwaltung bündelt E-Mail-Signatur, Datensicherung und Updates unter **Systemeinstellungen**. Die Funktionsseiten verlinken zurück zu dieser Übersicht. Die Bearbeitungszeiten bleiben über die Ticketverwaltung erreichbar.
+
+Paket: `Waxenberger-Ticketportal-Vollpaket-v1.0.1.zip`.
+
 ## Installation und Betrieb
 
 - [README.md](README.md) beschreibt Voraussetzungen, Neuinstallation, Update und Bedienung.

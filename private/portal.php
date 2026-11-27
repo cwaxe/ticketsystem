@@ -97,7 +97,9 @@ try {
     $signatureSettings = field($_GET, 'signatur') === '1';
     $backupSettings = field($_GET, 'sicherung') === '1';
     $updateSettings = field($_GET, 'updates') === '1';
-    if (($report || $signatureSettings || $backupSettings || $updateSettings) && !$admin) {
+    $systemSettings = field($_GET, 'system') === '1' && !$signatureSettings && !$backupSettings && !$updateSettings;
+    $inSettings = $systemSettings || $signatureSettings || $backupSettings || $updateSettings;
+    if (($report || $inSettings) && !$admin) {
         http_response_code(403);
         exit('Dieser Bereich ist für die Verwaltung vorgesehen.');
     }
@@ -361,7 +363,7 @@ try {
         $canBackup = class_exists(ZipArchive::class);
     } elseif ($signatureSettings) {
         $signature = ($action ?? '') === 'save-signature' ? field($_POST, 'signature') : mailSignature($db);
-    } elseif ($report) {
+    } elseif (!$systemSettings && $report) {
         $stats = query($db, "SELECT
             COUNT(CASE WHEN t.status <> 'Erledigt' THEN 1 END) AS open_count,
             COUNT(c.ticket_id) AS measured_count,
@@ -371,7 +373,7 @@ try {
         $recent = query($db, 'SELECT t.id, t.subject, t.received_at, c.closed_at, tn.number AS ticket_number FROM ticket_closures c
             JOIN tickets t ON t.id = c.ticket_id LEFT JOIN ticket_numbers tn ON tn.ticket_id = t.id
             ORDER BY c.closed_at DESC, c.ticket_id DESC LIMIT 25')->fetchAll();
-    } elseif ($user && ($id > 0 || in_array($action ?? '', ['comment', 'close', 'reopen'], true))) {
+    } elseif (!$systemSettings && $user && ($id > 0 || in_array($action ?? '', ['comment', 'close', 'reopen'], true))) {
         $parameters = $admin ? [$id] : [$id, $user['email']];
         $detail = query($db, 'SELECT t.*, c.closed_at, tn.number AS ticket_number, a.archived_at
             FROM tickets t LEFT JOIN ticket_closures c ON c.ticket_id = t.id
@@ -417,7 +419,7 @@ try {
             $notice = 'Dieses Ticket konnte nicht gefunden werden.';
         }
     }
-    if ($user && !$report && !$signatureSettings && !$backupSettings && !$updateSettings && !$new && !$detail) {
+    if ($user && !$report && !$inSettings && !$new && !$detail) {
         $where = $admin ? [] : ['t.email = ?'];
         $parameters = $admin ? [] : [$user['email']];
         if ($search !== '') {
@@ -547,6 +549,7 @@ try {
 <?php else: ?>
   <div class="page-title">
     <h1><?= match (true) {
+        $systemSettings => 'Systemeinstellungen',
         $updateSettings => 'Updates',
         $backupSettings => 'Datensicherung',
         $signatureSettings => 'E-Mail-Signatur',
@@ -556,14 +559,21 @@ try {
     } ?></h1>
     <div class="page-actions">
       <?php if ($admin && !$report): ?><a class="button secondary" href="?auswertung=1">Bearbeitungszeiten</a><?php endif ?>
-      <?php if ($admin && !$updateSettings): ?><a class="button secondary" href="?updates=1">Updates</a><?php endif ?>
-      <?php if ($admin && !$backupSettings): ?><a class="button secondary" href="?sicherung=1">Datensicherung</a><?php endif ?>
-      <?php if ($admin && !$signatureSettings): ?><a class="button secondary" href="?signatur=1">E-Mail-Signatur</a><?php endif ?>
+      <?php if ($admin && !$inSettings): ?><a class="button secondary" href="?system=1">Systemeinstellungen</a><?php endif ?>
       <form method="post" action="./"><?= csrfInput() ?><input type="hidden" name="action" value="logout"><button class="secondary">Abmelden</button></form>
     </div>
   </div>
-  <?php if ($updateSettings): ?>
+  <?php if ($systemSettings): ?>
     <a class="back" href="./">← Zur Ticketübersicht</a>
+    <nav class="system-settings" aria-label="Systemeinstellungen">
+      <ul class="panel detail">
+        <li><a href="?signatur=1">E-Mail-Signatur</a><p class="meta">Signatur für automatische E-Mails bearbeiten.</p></li>
+        <li><a href="?sicherung=1">Datensicherung</a><p class="meta">ZIP-Sicherung herunterladen oder wiederherstellen.</p></li>
+        <li><a href="?updates=1">Updates</a><p class="meta">Version <?= h($installedVersion) ?> · Nach Updates suchen und freigegebene Versionen installieren.</p></li>
+      </ul>
+    </nav>
+  <?php elseif ($updateSettings): ?>
+    <a class="back" href="?system=1">← Zu den Systemeinstellungen</a>
     <section class="panel detail editor">
       <h2>Installierte Version <?= h($installedVersion) ?></h2>
       <?php if ($updatePending): ?>
@@ -586,7 +596,7 @@ try {
       <?php endif ?>
     </section>
   <?php elseif ($backupSettings): ?>
-    <a class="back" href="./">← Zur Ticketübersicht</a>
+    <a class="back" href="?system=1">← Zu den Systemeinstellungen</a>
     <?php if (field($_GET, 'restored') === '1'): ?><p class="notice" role="status">Die Datensicherung wurde wiederhergestellt.</p><?php endif ?>
     <?php if (!$canBackup): ?>
       <p class="notice">Für Datensicherung und Wiederherstellung muss die PHP-Erweiterung zip aktiviert sein.</p>
@@ -609,7 +619,7 @@ try {
       </section>
     <?php endif ?>
   <?php elseif ($signatureSettings): ?>
-    <a class="back" href="./">← Zur Ticketübersicht</a>
+    <a class="back" href="?system=1">← Zu den Systemeinstellungen</a>
     <?php if (field($_GET, 'saved') === '1'): ?><p class="notice" role="status">Signatur gespeichert.</p><?php endif ?>
     <section class="panel detail">
       <form class="editor" method="post" action="?signatur=1">

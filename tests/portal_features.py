@@ -161,7 +161,31 @@ class PortalFeatures(unittest.TestCase):
             _, _, body = self.http('', cookie)
         return self.http(path, cookie, dict(data, csrf=self.csrf(body)), files)
 
+    def test_system_settings_navigation(self):
+        sections = {'?signatur=1': 'E-Mail-Signatur', '?sicherung=1': 'Datensicherung', '?updates=1': 'Updates'}
+        admin = self.page('', self.admin)
+        self.assertIn('href="?system=1">Systemeinstellungen</a>', admin)
+        self.assertIn('href="?auswertung=1">Bearbeitungszeiten</a>', admin)
+        settings = self.page('?system=1', self.admin)
+        self.assertIn('<h1>Systemeinstellungen</h1>', settings)
+        self.assertIn('href="./">← Zur Ticketübersicht</a>', settings)
+        for path, label in sections.items():
+            direct_link = f'href="{path}">{label}</a>'
+            self.assertNotIn(direct_link, admin)
+            self.assertIn(direct_link, settings)
+            page = self.page(path, self.admin)
+            self.assertIn(f'<h1>{label}</h1>', page)
+            self.assertIn('href="?system=1">← Zu den Systemeinstellungen</a>', page)
+        self.assertNotIn('Systemeinstellungen', self.page('', self.owner))
+        self.assertEqual(self.http('?system=1', self.owner)[0], 403)
+        self.assertEqual(self.http('?system=1')[0], 403)
+        self.assertEqual(self.post('?signatur=1', self.admin, action='save-signature', signature='Neue Signatur')[0], 303)
+        self.assertIn('Neue Signatur', self.page('?signatur=1&saved=1', self.admin))
+
     def test_git_updates(self):
+        installed = (self.private / 'version.txt').read_text().strip()
+        major, minor, patch = (int(part) for part in installed.split('.'))
+        first, second, broken = (f'{major}.{minor}.{patch + step}' for step in (1, 2, 3))
         repo = self.site / 'release-repo'
         repo.mkdir()
         for directory in ('private', 'public'):
@@ -193,17 +217,17 @@ class PortalFeatures(unittest.TestCase):
             subprocess.run(git + ['add', '.'], check=True, capture_output=True)
             subprocess.run(git + ['commit', '-m', version], check=True, capture_output=True)
 
-        self.assertIn('Version 1.0.0', self.page('', self.admin))
+        self.assertIn(f'Version {installed}', self.page('', self.admin))
         self.assertEqual(self.http('?updates=1', self.owner)[0], 403)
         self.assertEqual(self.post('', self.owner, action='check-update')[0], 403)
         self.assertEqual(self.http('?updates=1', self.admin, {'action': 'check-update'})[0], 403)
         self.assertIn('aktuellen freigegebenen Stand', updater('--check'))
         self.assertIn('zuerst', self.post('?updates=1', self.admin, action='install-update')[2].decode())
-        release('1.0.1')
+        release(first)
         self.assertEqual(self.post('?updates=1', self.admin, action='check-update')[0], 303)
         self.assertIn('vorgemerkt', self.page('?updates=1', self.admin))
-        self.assertIn('1.0.1', updater('--pending'))
-        self.assertIn('Version 1.0.1 installieren', self.page('?updates=1', self.admin))
+        self.assertIn(first, updater('--pending'))
+        self.assertIn(f'Version {first} installieren', self.page('?updates=1', self.admin))
         self.assertEqual(self.post('?updates=1', self.admin, action='install-update')[0], 303)
 
         # A newer commit requires another confirmation, even when it is on the allowed branch.
@@ -212,30 +236,30 @@ class PortalFeatures(unittest.TestCase):
             'CREATE TABLE IF NOT EXISTS update_test(id INTEGER PRIMARY KEY); PRAGMA user_version = 10;'))
         app = repo / 'private/app.php'
         app.write_text(app.read_text().replace('const SCHEMA_VERSION = 9;', 'const SCHEMA_VERSION = 10;'))
-        release('1.0.2')
+        release(second)
         self.assertIn('andere Version freigegeben', updater('--pending'))
-        self.assertIn('Installierte Version 1.0.0', self.page('?updates=1', self.admin))
-        self.assertIn('Version 1.0.2 installieren', self.page('?updates=1', self.admin))
+        self.assertIn(f'Installierte Version {installed}', self.page('?updates=1', self.admin))
+        self.assertIn(f'Version {second} installieren', self.page('?updates=1', self.admin))
         self.assertEqual(self.post('?updates=1', self.admin, action='install-update')[0], 303)
-        self.assertIn('1.0.2 wurde installiert', updater('--pending'))
+        self.assertIn(f'{second} wurde installiert', updater('--pending'))
         with self.database() as db:
             self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (9,))
-        self.assertIn('Installierte Version 1.0.2', self.page('?updates=1', self.admin))
+        self.assertIn(f'Installierte Version {second}', self.page('?updates=1', self.admin))
         with self.database() as db:
             self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (10,))
             self.assertEqual(db.execute('SELECT signature FROM mail_settings').fetchone(), ('Testsignatur',))
         self.assertIn('Drucker', self.page('?id=1', self.owner))
-        self.assertIn('Ticketportal: 1.0.2', self.php('worker.php', '--check').decode())
+        self.assertIn(f'Ticketportal: {second}', self.php('worker.php', '--check').decode())
         self.assertIn('admin@example.com', self.php('admin-login.php', '--status').decode())
-        self.assertIn('Build 1.0.2', self.page('?datei=style.css', self.owner))
+        self.assertIn(f'Build {second}', self.page('?datei=style.css', self.owner))
         self.assertEqual(self.http('?datei=../private/config.php')[0], 404)
 
-        release('1.0.3', invalid=True)
+        release(broken, invalid=True)
         updater('--check')
         self.assertEqual(self.post('?updates=1', self.admin, action='install-update')[0], 303)
         updater('--pending', code=1)
         self.assertIn('fehlgeschlagen', self.page('?updates=1', self.admin))
-        self.assertIn('Installierte Version 1.0.2', self.page('?updates=1', self.admin))
+        self.assertIn(f'Installierte Version {second}', self.page('?updates=1', self.admin))
         self.assertIn('Drucker', self.page('?id=1', self.owner))
         self.assertFalse((self.private / 'data/updates/request.json').exists())
 

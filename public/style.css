@@ -55,6 +55,10 @@ button:hover, .button:hover { background: #193e92 }
 .page-title h1 { margin: 0 }
 .page-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px }
 .back { display: inline-block; margin-bottom: 14px }
+.system-settings ul { list-style: none; margin: 0 }
+.system-settings li + li { border-top: 1px solid var(--line); margin-top: 15px; padding-top: 15px }
+.system-settings a { font-weight: bold }
+.system-settings .meta { margin: 4px 0 0 }
 .listing { overflow: hidden }
 .list-views { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px }
 .ticket-status-group th {

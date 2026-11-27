@@ -47,7 +47,7 @@ Alternativ die ersten drei Schritte per SSH mit demselben PHP-CLI ausführen, so
 
 ## 4. Anhänge und Datensicherung im Webportal
 
-Die Verwaltung zeigt unter **Datensicherung** den ZIP-Download und die Wiederherstellung an. Für diese Ansichten muss `zip` in der **Web-PHP-Version der Subdomain** verfügbar sein. Prüfe dies bei Bedarf auf der im WCP verlinkten PHP-Infoseite.
+Die Verwaltung zeigt unter **Systemeinstellungen → Datensicherung** den ZIP-Download und die Wiederherstellung an. Für diese Ansichten muss `zip` in der **Web-PHP-Version der Subdomain** verfügbar sein. Prüfe dies bei Bedarf auf der im WCP verlinkten PHP-Infoseite.
 
 Für die vollständigen Portal-Uploadlimits müssen `upload_max_filesize` mindestens 8 MiB, `max_file_uploads` mindestens 10 und `post_max_size` mehr als 16 MiB erlauben. Für die Wiederherstellung einer größeren Sicherung müssen `upload_max_filesize`, `post_max_size` und das HTTP-Anfragelimit die jeweilige ZIP-Größe einschließlich Formular-Overhead erlauben. Der private Datenordner braucht Platz für temporäre Dateien und ein Transaktionsjournal. Die Anwendung erlaubt SQLite-Sicherungen bis 512 MiB.
 
@@ -56,11 +56,11 @@ Bei einem Update Konfiguration und bisherigen Datenordner behalten. Die Migratio
 
 ## 5. Updates über GitHub einrichten
 
-Das erste nummerierte Vollpaket wie ein normales Update über die bestehende Installation entpacken. Dokumentenstamm und Mail-Aufgabe bleiben auf `public/` und `private/worker.php`. Das Menü **Updates** zeigt die installierte Version. Für spätere Updates sind diese einmaligen Schritte nötig.
+Das erste nummerierte Vollpaket wie ein normales Update über die bestehende Installation entpacken. Dokumentenstamm und Mail-Aufgabe bleiben auf `public/` und `private/worker.php`. **Systemeinstellungen → Updates** zeigt die installierte Version. Für spätere Updates sind diese einmaligen Schritte nötig.
 
 1. Im Hosting-Benutzerkonto einen SSH-Schlüssel für den Updatejob einrichten und den öffentlichen Schlüssel im Repository `cwaxe/ticketsystem` unter **Settings → Deploy keys** hinterlegen. Die Option **Allow write access** bleibt aus. Den privaten Schlüssel im Hosting-Konto belassen und der SSH-Konfiguration für `github.com` zuordnen. Den GitHub-Hostschlüssel nach Abgleich mit den offiziellen Fingerabdrücken in `known_hosts` hinterlegen. Der Job verwendet dieselbe SSH-Konfiguration wie das Hosting-Benutzerkonto und fragt kein Passwort ab.
 2. In netcup eine zweite Aufgabe vom Typ **PHP-Skript ausführen** mit `private/update.php` und dem Argument `--pending` anlegen. Das Intervall bestimmt, wann eine Anfrage aus dem Backend bearbeitet wird. Der PHP-CLI-Prozess benötigt `proc_open` und Zugriff auf `git`, `tar`, `cp` sowie SSH. Bei einer Änderung der PHP-Abhängigkeiten benötigt er zusätzlich `composer`.
-3. In der Verwaltung **Updates → Auf Updates prüfen** wählen. Nach dem Lauf der Update-Aufgabe erscheint das Ergebnis auf dieser Seite. Sobald eine neuere Version verfügbar ist, kann sie dort zur Installation freigegeben werden. Ein weiterer Lauf der Aufgabe installiert genau den bestätigten Git-Stand. Bei einem Fehler stehen Details in der Ausgabe der geplanten Aufgabe.
+3. In der Verwaltung **Systemeinstellungen → Updates → Auf Updates prüfen** wählen. Nach dem Lauf der Update-Aufgabe erscheint das Ergebnis auf dieser Seite. Sobald eine neuere Version verfügbar ist, kann sie dort zur Installation freigegeben werden. Ein weiterer Lauf der Aufgabe installiert genau den bestätigten Git-Stand. Bei einem Fehler stehen Details in der Ausgabe der geplanten Aufgabe.
 
 Wer bereits SSH nutzt, kann vom Installationsordner aus direkt `php private/update.php --check` ausführen. `php private/update.php --apply` installiert den zuletzt veröffentlichten Stand aus dem Branch `release`, wenn seine Version höher ist als die installierte.
 
