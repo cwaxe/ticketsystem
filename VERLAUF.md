@@ -97,7 +97,15 @@ Der lokale Test deckte die Migration, uneindeutige Altzuordnungen, importierte u
 
 Die HTML-Fassung von Statusmails enthält das eingebettete Firmenlogo. Die Textfassung bleibt verfügbar.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Kunden-Status-Logo.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Kunden-Status-Logo.zip`.
+
+## 11. Inhalt in Admin-Mails
+
+Die Adminbenachrichtigung für neue Tickets enthält Absender, Betreff und übernommenen Nachrichtentext sowie einen Link zum Ticket. Sie weist auf Anhänge in der Original-E-Mail hin. Admin-Mails zu Kundenkommentaren enthalten den neuen Beitrag aus dem Portal oder aus der E-Mail-Antwort. Der zitierte E-Mail-Verlauf bleibt im Ticket aufklappbar.
+
+Der lokale SMTP-Test prüfte den Inhalt in HTML und Text für neue Tickets, Portal-Kommentare und E-Mail-Antworten.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Admin-Mails.zip`.
 
 ## Installation und Betrieb
 

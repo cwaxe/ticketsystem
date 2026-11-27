@@ -179,9 +179,12 @@ function deliverOutbox(PDO $db, array $config, ?callable $send = null): array
     query($db, 'DELETE FROM links WHERE expires_at <= ?', [$now]);
     query($db, 'DELETE FROM rate_limits WHERE expires_at <= ?', [$now]);
     query($db, 'DELETE FROM outbox WHERE ticket_id IS NULL AND created_at <= ?', [$now - LINK_SECONDS]);
-    $rows = query($db, 'SELECT o.*, c.body AS comment_body, s.old_status, s.new_status FROM outbox o
+    $rows = query($db, 'SELECT o.*, c.body AS comment_body, s.old_status, s.new_status,
+        t.email AS ticket_sender, t.subject AS ticket_subject, t.body AS ticket_body, t.attachment_notice
+        FROM outbox o
         LEFT JOIN comment_notifications n ON n.outbox_id = o.id LEFT JOIN ticket_comments c ON c.id = n.comment_id
         LEFT JOIN status_notifications s ON s.outbox_id = o.id
+        LEFT JOIN tickets t ON t.id = o.ticket_id AND o.role = \'admin\' AND n.outbox_id IS NULL AND s.outbox_id IS NULL
         WHERE o.next_attempt <= ? ORDER BY o.next_attempt, o.id LIMIT 15', [$now])->fetchAll();
     $failures = 0;
     $sent = 0;
@@ -243,11 +246,15 @@ function outboxMessage(PDO $db, array $config, array $row): array
         ];
     }
     if ($row['role'] === 'admin' && $row['ticket_id'] !== null) {
-        $code = ticketCode((int) $row['ticket_id']);
+        $ticket = (int) $row['ticket_id'];
+        $code = ticketCode($ticket);
+        $text = $row['ticket_body'] !== '' ? $row['ticket_body'] : 'Die E-Mail enthält keinen übernommenen Nachrichtentext.';
+        $attachments = $row['attachment_notice'] ? "\n\nAnhänge liegen in der Original-E-Mail im Ticketpostfach." : '';
         return [
             'Neues Ticket ' . $code,
             "Guten Tag,\n\nIm Ticketportal wurde das Ticket " . $code . " erfasst.\n\n"
-                . "Zur Ticketverwaltung:\n" . $config['base_url'] . '?admin=1',
+                . 'Absender: ' . $row['ticket_sender'] . "\nBetreff: " . $row['ticket_subject'] . "\n\n"
+                . $text . $attachments . "\n\nZum Ticket:\n" . $config['base_url'] . '?id=' . $ticket . '&admin=1',
         ];
     }
 
