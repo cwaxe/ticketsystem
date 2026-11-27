@@ -181,6 +181,14 @@ Die Verwaltung kann eine ZIP-Datensicherung herunterladen und nach Bestätigung 
 
 Paket: `Waxenberger-Ticketportal-Vollpaket-Wiederoeffnen-Anhaenge-Datensicherung.zip`.
 
+## 21. Version 1.0.0 und Updates über GitHub
+
+Die erste nummerierte Version zeigt ihren Stand im Portal und im PHP-Worker an. Die Verwaltung kann im Backend den freigegebenen GitHub-Stand prüfen und eine gefundene Version zur Installation freigeben. Die geplante Aufgabe `private/update.php --pending` führt die Anfrage aus. Die bisherige netcup-Installation und die Mail-Aufgabe behalten ihre Einstiegspunkte.
+
+Der Integrationstest verwendet ein lokales Git-Repository und prüft Versionserkennung, Rollenrechte, erneute Freigabe bei geänderter Version, Aktivierung und einen fehlgeschlagenen Installationsversuch.
+
+Paket: `Waxenberger-Ticketportal-Vollpaket-v1.0.0.zip`.
+
 ## Installation und Betrieb
 
 - [README.md](README.md) beschreibt Voraussetzungen, Neuinstallation, Update und Bedienung.

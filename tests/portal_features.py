@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import io
 import json
+import os
 import re
 import shutil
 import socket
@@ -159,6 +160,84 @@ class PortalFeatures(unittest.TestCase):
         if status != 200:  # A non-owner can submit a valid token from their own page.
             _, _, body = self.http('', cookie)
         return self.http(path, cookie, dict(data, csrf=self.csrf(body)), files)
+
+    def test_git_updates(self):
+        repo = self.site / 'release-repo'
+        repo.mkdir()
+        for directory in ('private', 'public'):
+            shutil.copytree(self.site / directory, repo / directory,
+                            ignore=shutil.ignore_patterns('config.php', 'data', 'vendor'))
+        git = ['git', '-C', str(repo)]
+        for args in (['init', '-b', 'release'], ['config', 'user.name', 'Update test'],
+                     ['config', 'user.email', 'update@example.com'], ['add', '.'],
+                     ['commit', '-m', 'Initial release']):
+            subprocess.run(git + args, check=True, capture_output=True)
+        env = os.environ | {
+            'GIT_CONFIG_COUNT': '1',
+            'GIT_CONFIG_KEY_0': f'url.{repo.as_uri()}.insteadOf',
+            'GIT_CONFIG_VALUE_0': 'git@github.com:cwaxe/ticketsystem.git',
+        }
+
+        def updater(mode, code=0):
+            result = subprocess.run([PHP, '-d', f'sys_temp_dir={self.site}', self.private / 'update.php', mode],
+                                    cwd=self.private, env=env, capture_output=True, timeout=30)
+            self.assertEqual(result.returncode, code, (result.stdout, result.stderr))
+            return result.stdout.decode()
+
+        def release(version, invalid=False):
+            (repo / 'private/version.txt').write_text(version + '\n')
+            if invalid:
+                (repo / 'private/invalid.php').write_text('<?php function () {')
+            css = repo / 'public/style.css'
+            css.write_text(css.read_text() + f'\n/* Build {version} */\n')
+            subprocess.run(git + ['add', '.'], check=True, capture_output=True)
+            subprocess.run(git + ['commit', '-m', version], check=True, capture_output=True)
+
+        self.assertIn('Version 1.0.0', self.page('', self.admin))
+        self.assertEqual(self.http('?updates=1', self.owner)[0], 403)
+        self.assertEqual(self.post('', self.owner, action='check-update')[0], 403)
+        self.assertEqual(self.http('?updates=1', self.admin, {'action': 'check-update'})[0], 403)
+        self.assertIn('aktuellen freigegebenen Stand', updater('--check'))
+        self.assertIn('zuerst', self.post('?updates=1', self.admin, action='install-update')[2].decode())
+        release('1.0.1')
+        self.assertEqual(self.post('?updates=1', self.admin, action='check-update')[0], 303)
+        self.assertIn('vorgemerkt', self.page('?updates=1', self.admin))
+        self.assertIn('1.0.1', updater('--pending'))
+        self.assertIn('Version 1.0.1 installieren', self.page('?updates=1', self.admin))
+        self.assertEqual(self.post('?updates=1', self.admin, action='install-update')[0], 303)
+
+        # A newer commit requires another confirmation, even when it is on the allowed branch.
+        schema = repo / 'private/schema.sql'
+        schema.write_text(schema.read_text().replace('PRAGMA user_version = 9;',
+            'CREATE TABLE IF NOT EXISTS update_test(id INTEGER PRIMARY KEY); PRAGMA user_version = 10;'))
+        app = repo / 'private/app.php'
+        app.write_text(app.read_text().replace('const SCHEMA_VERSION = 9;', 'const SCHEMA_VERSION = 10;'))
+        release('1.0.2')
+        self.assertIn('andere Version freigegeben', updater('--pending'))
+        self.assertIn('Installierte Version 1.0.0', self.page('?updates=1', self.admin))
+        self.assertIn('Version 1.0.2 installieren', self.page('?updates=1', self.admin))
+        self.assertEqual(self.post('?updates=1', self.admin, action='install-update')[0], 303)
+        self.assertIn('1.0.2 wurde installiert', updater('--pending'))
+        with self.database() as db:
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (9,))
+        self.assertIn('Installierte Version 1.0.2', self.page('?updates=1', self.admin))
+        with self.database() as db:
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (10,))
+            self.assertEqual(db.execute('SELECT signature FROM mail_settings').fetchone(), ('Testsignatur',))
+        self.assertIn('Drucker', self.page('?id=1', self.owner))
+        self.assertIn('Ticketportal: 1.0.2', self.php('worker.php', '--check').decode())
+        self.assertIn('admin@example.com', self.php('admin-login.php', '--status').decode())
+        self.assertIn('Build 1.0.2', self.page('?datei=style.css', self.owner))
+        self.assertEqual(self.http('?datei=../private/config.php')[0], 404)
+
+        release('1.0.3', invalid=True)
+        updater('--check')
+        self.assertEqual(self.post('?updates=1', self.admin, action='install-update')[0], 303)
+        updater('--pending', code=1)
+        self.assertIn('fehlgeschlagen', self.page('?updates=1', self.admin))
+        self.assertIn('Installierte Version 1.0.2', self.page('?updates=1', self.admin))
+        self.assertIn('Drucker', self.page('?id=1', self.owner))
+        self.assertFalse((self.private / 'data/updates/request.json').exists())
 
     def test_end_to_end(self):
         self.assertIn('Begründung zum Wiederöffnen', self.page('?id=1', self.owner))

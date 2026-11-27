@@ -8,7 +8,7 @@ const BACKUP_DATABASE = 'tickets.sqlite3';
 
 function backupTempFile(): string
 {
-    $file = tempnam(__DIR__ . '/data', 'backup-');
+    $file = tempnam(portalPrivatePath('data'), 'backup-');
     if ($file === false) {
         throw new RuntimeException('Es konnte keine temporäre Datei angelegt werden.');
     }
@@ -103,7 +103,7 @@ function restoreBackup(PDO $db, string $archive): void
     $attached = false;
     try {
         unpackBackup($archive, $snapshot);
-        $lock = fopen(__DIR__ . '/data/worker.lock', 'c');
+        $lock = fopen(portalPrivatePath('data/worker.lock'), 'c');
         if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
             throw new InvalidArgumentException('Die E-Mail-Aufgabe läuft gerade. Bitte versuchen Sie es erneut.');
         }

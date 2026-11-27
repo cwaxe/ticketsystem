@@ -32,6 +32,12 @@ Für netcup Webhosting siehe [NETCUP.md](NETCUP.md). Die Entwicklung und die Än
 
 Sichere die SQLite-Datenbank und die Konfiguration. Entpacke die ZIP dort, wo `public/` und `private/` bereits liegen, und ersetze die enthaltenen Dateien. `private/config.php` und `private/data/` gehören zur bestehenden Installation. Beim nächsten Aufruf wird die Datenbank automatisch erweitert. Die laufende Aufgabe `private/worker.php` verwendet weiterhin ein leeres Argumentfeld.
 
+## Versionsnummer und GitHub-Updates
+
+Die Programmversion steht in `private/version.txt` und wird in der Fußzeile, unter **Updates** und bei `php private/worker.php --check` angezeigt. Versionsnummern verwenden das Format `MAJOR.MINOR.PATCH`. Der Branch `release` enthält den freigegebenen Stand. Für eine neue Freigabe die Versionsnummer in `main` erhöhen, testen und `release` auf den geprüften Commit vorsetzen. Der Updater prüft auf eine strikt höhere Versionsnummer und installiert bei einer Freigabe im Backend nur den zuvor geprüften Git-Commit.
+
+Die festen Einstiegspunkte im Installationsordner laden nach einem Git-Update die freigegebene Programmversion aus `private/data/updates/`. Der Updater bereitet sie einschließlich Abhängigkeiten vor, prüft PHP-Dateien und testet die SQLite-Migration an einer Kopie. Danach schaltet er die Programmversion um. Die SQLite-Datei und die Konfiguration werden weiter vom Installationsordner verwendet. Für SSH-Zugang und die geplante Update-Aufgabe siehe [NETCUP.md](NETCUP.md#5-updates-über-github-einrichten). Falls bereits Git-Updates installiert wurden, wird der bestehende aktive Programmstand über den Git-Updater aktualisiert.
+
 ## Bedienung
 
 - Kunden sehen die Tickets ihrer jeweiligen Absenderadresse und deren Status. Sie können Kommentare hinzufügen, eigene Tickets schließen und erledigte Tickets mit einer Begründung wieder öffnen. Ein solches Ticket erhält den Status **Wieder geöffnet**. Die Begründung erscheint in der Konversation und wird an Kunde und Verwaltung geschickt. Der Anmeldelink gilt höchstens 24 Stunden und kann einmal verwendet werden. Die Anmeldung wird im Portal bestätigt, damit ein bloßer Linkabruf durch einen E-Mail-Scanner den Link nicht verbraucht. Im Kundenportal lassen sich neue Links anfordern.
@@ -65,6 +71,6 @@ Eine Sicherung unterstützt Datenbanken bis 512 MiB. Für den ZIP-Upload gelten 
 
 ## Integrationstest
 
-Nach `composer install --working-dir=private --no-dev --prefer-dist` lässt sich mit `python3 tests/portal_features.py` der Ablauf für Wiederöffnung, Benachrichtigungen, Anhänge, Mailimport und Sicherung prüfen. Der Test benötigt PHP mit `pdo_sqlite`, `mbstring` und `zip` und verwendet ein temporäres Portal mit Testadressen.
+Nach `composer install --working-dir=private --no-dev --prefer-dist` lässt sich mit `python3 tests/portal_features.py` der Ablauf für Wiederöffnung, Benachrichtigungen, Anhänge, Mailimport und Sicherung prüfen. Der Test benötigt PHP mit `pdo_sqlite`, `mbstring` und `zip` sowie Git, tar und cp. Er verwendet ein temporäres Portal mit Testadressen und ein lokales Test-Repository.
 
 Logo und Favicon stammen von der Firmenwebsite. Die Links für Impressum und Datenschutz führen zu den bestehenden Seiten.

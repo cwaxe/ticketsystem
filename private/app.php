@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+if (!defined('TICKET_PORTAL_HOME')) {
+    require_once __DIR__ . '/deployment.php';
+}
 require_once __DIR__ . '/attachments.php';
 
 const STATUSES = ['Offen', 'Wieder geöffnet', 'In Arbeit', 'Wartet', 'Erledigt'];
@@ -30,7 +33,7 @@ function emailDomain(string $address): string
 
 function appConfig(): array
 {
-    $filename = __DIR__ . '/config.php';
+    $filename = portalPrivatePath('config.php');
     if (!is_file($filename)) {
         throw new RuntimeException('Bitte private/config.php anlegen.');
     }
@@ -55,9 +58,9 @@ function appConfig(): array
     return $config;
 }
 
-function database(): PDO
+function database(?string $file = null): PDO
 {
-    $db = new PDO('sqlite:' . __DIR__ . '/data/tickets.sqlite3', null, null, [
+    $db = new PDO('sqlite:' . ($file ?? portalPrivatePath('data/tickets.sqlite3')), null, null, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
