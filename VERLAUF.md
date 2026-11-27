@@ -153,7 +153,17 @@ Paket: `Waxenberger-Ticketportal-Vollpaket-Mailbegrussung.zip`.
 
 Die Gruppenüberschriften in der Ticketübersicht übernehmen die Farben der Statusmails: Offen blau, In Arbeit violett, Wartet bernsteinfarben und Erledigt grün.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Statusbereiche.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Statusbereiche.zip`.
+
+## 18. Zufällige Ticketnummern mit Jahreszahl und Archiv
+
+Neue Tickets erhalten eine eindeutige Zufallsnummer aus Jahreszahl und achtstelliger Zahlenfolge. Das Format lautet beispielsweise `T-2026-58371624`. Die Nummer erscheint in der Übersicht, der Detailansicht, der Auswertung und den zugehörigen E-Mails. Bereits vergebene Nummern bleiben erhalten.
+
+Die Verwaltung kann erledigte Tickets ins Archiv verschieben, dort suchen und sie zurückholen. Beim Wiederöffnen erscheint ein archiviertes Ticket wieder in der normalen Admin-Übersicht. Kunden behalten Zugriff auf ihre eigenen archivierten Tickets.
+
+Lokal geprüft wurden Datenbankmigration, manuelle Anlage und Import, Nummern in Portal und E-Mails, die Suche nach alten und neuen Nummern sowie Archivieren, Wiederherstellen und Wiederöffnen.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Ticketnummern-und-Archiv.zip`.
 
 ## Installation und Betrieb
 

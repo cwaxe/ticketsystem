@@ -195,11 +195,12 @@ function deliverOutbox(PDO $db, array $config, ?callable $send = null): array
     query($db, 'DELETE FROM links WHERE expires_at <= ?', [$now]);
     query($db, 'DELETE FROM rate_limits WHERE expires_at <= ?', [$now]);
     query($db, 'DELETE FROM outbox WHERE ticket_id IS NULL AND created_at <= ?', [$now - LINK_SECONDS]);
-    $rows = query($db, 'SELECT o.*, c.body AS comment_body, s.old_status, s.new_status,
+    $rows = query($db, 'SELECT o.*, c.body AS comment_body, s.old_status, s.new_status, tn.number AS ticket_number,
         t.email AS ticket_sender, t.subject AS ticket_subject, t.body AS ticket_body, t.attachment_notice
         FROM outbox o
         LEFT JOIN comment_notifications n ON n.outbox_id = o.id LEFT JOIN ticket_comments c ON c.id = n.comment_id
         LEFT JOIN status_notifications s ON s.outbox_id = o.id
+        LEFT JOIN ticket_numbers tn ON tn.ticket_id = o.ticket_id
         LEFT JOIN tickets t ON t.id = o.ticket_id AND o.role = \'admin\' AND n.outbox_id IS NULL AND s.outbox_id IS NULL
         WHERE o.next_attempt <= ? ORDER BY o.next_attempt, o.id LIMIT 15', [$now])->fetchAll();
     $failures = 0;
@@ -240,7 +241,7 @@ function outboxMessage(PDO $db, array $config, array $row): array
     $newStatus = $row['new_status'] ?? null;
     if ($comment !== null || $newStatus !== null) {
         $ticket = (int) $row['ticket_id'];
-        $code = ticketCode($ticket);
+        $code = ticketCode($ticket, $row['ticket_number'] ?? null);
         $admin = $row['role'] === 'admin';
         if ($newStatus === null) {
             if ($admin) {
@@ -267,7 +268,7 @@ function outboxMessage(PDO $db, array $config, array $row): array
     }
     if ($row['role'] === 'admin' && $row['ticket_id'] !== null) {
         $ticket = (int) $row['ticket_id'];
-        $code = ticketCode($ticket);
+        $code = ticketCode($ticket, $row['ticket_number'] ?? null);
         $text = $row['ticket_body'] !== '' ? $row['ticket_body'] : 'Die E-Mail enthält keinen übernommenen Nachrichtentext.';
         $attachments = $row['attachment_notice'] ? "\n\nAnhänge liegen in der Original-E-Mail im Ticketpostfach." : '';
         return [
@@ -293,7 +294,7 @@ function outboxMessage(PDO $db, array $config, array $row): array
     $intro = "für das Ticketportal haben Sie einen Anmeldelink angefordert.";
     $subject = 'Ihr Anmeldelink zum Ticketportal';
     if ($row['ticket_id'] !== null) {
-        $code = ticketCode((int) $row['ticket_id']);
+        $code = ticketCode((int) $row['ticket_id'], $row['ticket_number'] ?? null);
         $intro = "vielen Dank für Ihre Nachricht. Wir haben Ihr Anliegen als Ticket " . $code . " erfasst.\n"
             . "Sie können direkt auf diese E-Mail antworten. Ihre Antwort wird dem Ticket zugeordnet.";
         $subject = 'Eingangsbestätigung ' . $code;

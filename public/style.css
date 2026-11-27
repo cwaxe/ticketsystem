@@ -93,6 +93,7 @@ td small { display: block; margin-top: 2px }
     gap: 12px;
 }
 .ticket-heading h2 { font-size: clamp(20px, 3vw, 25px); margin-bottom: 6px }
+.ticket-heading-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px }
 .ticket-heading .meta:last-child { overflow-wrap: anywhere; margin-bottom: 0 }
 .ticket-reference { margin-bottom: 4px }
 .ticket-heading-closed {

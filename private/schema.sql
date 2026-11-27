@@ -170,5 +170,21 @@ BEGIN
     VALUES (NEW.id, NEW.status, NEW.received_at);
 END;
 
-PRAGMA user_version = 7;
+CREATE TABLE IF NOT EXISTS ticket_numbers (
+    ticket_id INTEGER PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+    number TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS ticket_archive (
+    ticket_id INTEGER PRIMARY KEY REFERENCES tickets(id) ON DELETE CASCADE,
+    archived_at INTEGER NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS ticket_reopened_unarchive
+AFTER UPDATE OF status ON tickets
+WHEN OLD.status = 'Erledigt' AND NEW.status <> 'Erledigt'
+BEGIN
+    DELETE FROM ticket_archive WHERE ticket_id = NEW.id;
+END;
+
+PRAGMA user_version = 8;
 COMMIT;

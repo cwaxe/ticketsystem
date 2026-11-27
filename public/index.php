@@ -84,15 +84,16 @@ try {
     $search = trim(substr(field($_GET, 'q'), 0, 250));
     $filter = field($_GET, 'status');
     $page = max(1, min(100000, (int) field($_GET, 'seite')));
-    $grouped = $admin && field($_GET, 'gruppe') === 'kunden';
-    $onlyNew = $admin && !$grouped && field($_GET, 'neu') === '1';
+    $archiveView = $admin && field($_GET, 'archiv') === '1';
+    $grouped = $admin && !$archiveView && field($_GET, 'gruppe') === 'kunden';
+    $onlyNew = $admin && !$archiveView && !$grouped && field($_GET, 'neu') === '1';
     $customerParam = field($_GET, 'kunde');
     $customerFilter = $grouped && preg_match('/\A[0-9]{1,18}\z/', $customerParam) ? (int) $customerParam : null;
     $customerOverview = $grouped && $customerFilter === null;
     $filters = array_filter(['q' => $search, 'status' => $filter], static fn (string $value): bool => $value !== '');
     $listParams = $filters + ($grouped ? ['gruppe' => 'kunden'] : []) + ($customerFilter !== null ? ['kunde' => $customerFilter] : [])
-        + ($onlyNew ? ['neu' => 1] : []);
-    $groupContext = $grouped || $onlyNew ? $listParams + ($page > 1 ? ['seite' => $page] : []) : [];
+        + ($onlyNew ? ['neu' => 1] : []) + ($archiveView ? ['archiv' => 1] : []);
+    $groupContext = $grouped || $onlyNew || $archiveView ? $listParams + ($page > 1 ? ['seite' => $page] : []) : [];
     $db = database();
     $notice = '';
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
@@ -188,6 +189,23 @@ try {
                 $notice = 'Das Ticket wurde zwischenzeitlich geändert oder gelöscht. Die aktuellen Daten wurden geladen.';
             }
         }
+        if ($action === 'archive' || $action === 'restore') {
+            if (!$admin) {
+                http_response_code(403);
+                exit('Dieser Bereich ist für die Verwaltung vorgesehen.');
+            }
+            $revision = (int) field($_POST, 'revision');
+            $change = $action === 'archive'
+                ? query($db, "INSERT INTO ticket_archive (ticket_id, archived_at)
+                    SELECT id, ? FROM tickets WHERE id = ? AND revision = ? AND status = 'Erledigt'
+                    ON CONFLICT(ticket_id) DO NOTHING", [time(), $id, $revision])
+                : query($db, 'DELETE FROM ticket_archive WHERE ticket_id = ? AND EXISTS (
+                    SELECT 1 FROM tickets WHERE id = ticket_archive.ticket_id AND revision = ?)', [$id, $revision]);
+            if ($change->rowCount() > 0) {
+                go($config, '?' . http_build_query(['id' => $id, 'archivstatus' => $action] + $groupContext));
+            }
+            $notice = 'Das Ticket wurde zwischenzeitlich geändert oder kann in diesem Status nicht archiviert werden.';
+        }
         if ($action === 'save' || $action === 'delete') {
             if (!$admin) {
                 http_response_code(403);
@@ -230,9 +248,8 @@ try {
                     if (!$email || $subject === '' || strlen($subject) > 720 || strlen($body) > MAX_TICKET_LENGTH * 4) {
                         $notice = 'Bitte prüfen Sie E-Mail-Adresse, Betreff und Nachricht.';
                     } else {
-                        query($db, 'INSERT INTO tickets (email, subject, body, status, priority, due, notes, received_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [$email, $subject, $body, $status, $priority, $due, $notes, time()]);
-                        go($config, '?id=' . (int) $db->lastInsertId() . '&saved=1');
+                        $ticket = createTicket($db, $email, $subject, $body, compact('status', 'priority', 'due', 'notes'));
+                        go($config, '?id=' . $ticket . '&saved=1');
                     }
                 }
             }
@@ -256,11 +273,14 @@ try {
             COUNT(CASE WHEN t.status = 'Erledigt' AND c.ticket_id IS NULL THEN 1 END) AS unknown_count,
             AVG(MAX(0, c.closed_at - t.received_at)) AS average_seconds
             FROM tickets t LEFT JOIN ticket_closures c ON c.ticket_id = t.id")->fetch();
-        $recent = query($db, 'SELECT t.id, t.subject, t.received_at, c.closed_at FROM ticket_closures c
-            JOIN tickets t ON t.id = c.ticket_id ORDER BY c.closed_at DESC, c.ticket_id DESC LIMIT 25')->fetchAll();
+        $recent = query($db, 'SELECT t.id, t.subject, t.received_at, c.closed_at, tn.number AS ticket_number FROM ticket_closures c
+            JOIN tickets t ON t.id = c.ticket_id LEFT JOIN ticket_numbers tn ON tn.ticket_id = t.id
+            ORDER BY c.closed_at DESC, c.ticket_id DESC LIMIT 25')->fetchAll();
     } elseif ($user && ($id > 0 || in_array($action ?? '', ['comment', 'close'], true))) {
         $parameters = $admin ? [$id] : [$id, $user['email']];
-        $detail = query($db, 'SELECT t.*, c.closed_at FROM tickets t LEFT JOIN ticket_closures c ON c.ticket_id = t.id
+        $detail = query($db, 'SELECT t.*, c.closed_at, tn.number AS ticket_number, a.archived_at
+            FROM tickets t LEFT JOIN ticket_closures c ON c.ticket_id = t.id
+            LEFT JOIN ticket_numbers tn ON tn.ticket_id = t.id LEFT JOIN ticket_archive a ON a.ticket_id = t.id
             WHERE t.id = ?' . ($admin ? '' : ' AND t.email = ?'), $parameters)->fetch();
         if ($detail) {
             $conversation = query($db, "SELECT role, body, created_at, id, NULL AS old_status, NULL AS new_status, 0 AS status_event, 1 AS event_order
@@ -293,7 +313,7 @@ try {
         $where = $admin ? [] : ['t.email = ?'];
         $parameters = $admin ? [] : [$user['email']];
         if ($search !== '') {
-            $where[] = "(instr(lower(t.subject), lower(?)) > 0 OR instr(lower(t.email), lower(?)) > 0 OR printf('T-%04d', t.id) = upper(?)" .
+            $where[] = "(instr(lower(t.subject), lower(?)) > 0 OR instr(lower(t.email), lower(?)) > 0 OR COALESCE(tn.number, printf('T-%04d', t.id)) = upper(?)" .
                 ($admin ? " OR instr(lower(c.name), lower(?)) > 0" : '') . ')';
             array_push($parameters, $search, $search, $search);
             if ($admin) {
@@ -305,7 +325,9 @@ try {
             $parameters[] = $filter;
         }
         if ($admin) {
-            $unreadCount = (int) query($db, 'SELECT COUNT(*) FROM unread_tickets')->fetchColumn();
+            $unreadCount = (int) query($db, 'SELECT COUNT(*) FROM unread_tickets u
+                WHERE NOT EXISTS (SELECT 1 FROM ticket_archive a WHERE a.ticket_id = u.ticket_id)')->fetchColumn();
+            $where[] = $archiveView ? 'a.ticket_id IS NOT NULL' : 'a.ticket_id IS NULL';
         }
         if ($onlyNew) {
             $where[] = 'u.ticket_id IS NOT NULL';
@@ -323,17 +345,17 @@ try {
             }
         }
         $offset = ($page - 1) * 50;
-        $selection = ' FROM tickets t';
+        $selection = ' FROM tickets t LEFT JOIN ticket_numbers tn ON tn.ticket_id = t.id';
         if ($admin) {
             $selection .= ' LEFT JOIN ticket_customers tc ON tc.ticket_id = t.id LEFT JOIN customers c ON c.id = tc.customer_id
-                LEFT JOIN unread_tickets u ON u.ticket_id = t.id';
+                LEFT JOIN unread_tickets u ON u.ticket_id = t.id LEFT JOIN ticket_archive a ON a.ticket_id = t.id';
         }
         $selection .= $where ? ' WHERE ' . implode(' AND ', $where) : '';
         $listing = $customerOverview
             ? "SELECT COALESCE(tc.customer_id, 0) AS customer_id, c.name AS customer_name, COUNT(*) AS total,
                 COUNT(CASE WHEN t.status <> 'Erledigt' THEN 1 END) AS active, MAX(t.received_at) AS latest" .
                 $selection . ' GROUP BY tc.customer_id, c.name ORDER BY latest DESC, c.name, customer_id'
-            : 'SELECT t.id, t.subject, t.email, t.status, t.priority, t.due, t.received_at' .
+            : 'SELECT t.id, t.subject, t.email, t.status, t.priority, t.due, t.received_at, tn.number AS ticket_number' .
                 ($admin ? ', c.name AS customer_name, u.ticket_id IS NOT NULL AS is_new' : '') . $selection .
                 " ORDER BY CASE t.status WHEN 'Offen' THEN 0 WHEN 'In Arbeit' THEN 1 WHEN 'Wartet' THEN 2 WHEN 'Erledigt' THEN 3 ELSE 4 END, t.status" .
                 ($admin ? ', is_new DESC' : '') . ', t.id DESC';
@@ -359,7 +381,7 @@ try {
   <link rel="icon" type="image/png" sizes="150x150" href="favicon-150.png">
   <link rel="icon" type="image/png" sizes="300x300" href="favicon-300.png">
   <link rel="apple-touch-icon" href="favicon-300.png">
-  <link rel="stylesheet" href="style.css?v=11">
+  <link rel="stylesheet" href="style.css?v=12">
   <?php if ($showLink): ?><script src="signin.js" defer></script><?php endif ?>
 </head>
 <body>
@@ -453,7 +475,7 @@ try {
             <tbody>
               <?php foreach ($recent as $row): ?>
                 <tr>
-                  <td><a href="?id=<?= h($row['id']) ?>"><?= h($row['subject']) ?></a><small><?= h(ticketCode((int) $row['id'])) ?></small></td>
+                  <td><a href="?id=<?= h($row['id']) ?>"><?= h($row['subject']) ?></a><small><?= h(ticketCode((int) $row['id'], $row['ticket_number'])) ?></small></td>
                   <td><?= h(date('d.m.Y, H:i', (int) $row['closed_at'])) ?></td>
                   <td><?= h(formatDuration((int) $row['closed_at'] - (int) $row['received_at'])) ?></td>
                 </tr>
@@ -468,11 +490,13 @@ try {
     <?php if ($detail && field($_GET, 'saved') === '1'): ?><p class="notice" role="status">Ticket gespeichert.</p><?php endif ?>
     <?php if ($admin && $detail && field($_GET, 'zugeordnet') === '1'): ?><p class="notice" role="status">Kundenzuordnung gespeichert.</p><?php endif ?>
     <?php if ($detail && field($_GET, 'closed') === '1' && $detail['status'] === 'Erledigt'): ?><p class="notice" role="status">Ticket geschlossen.</p><?php endif ?>
+    <?php if ($admin && $detail && field($_GET, 'archivstatus') === 'archive' && $detail['archived_at'] !== null): ?><p class="notice" role="status">Ticket archiviert.</p><?php endif ?>
+    <?php if ($admin && $detail && field($_GET, 'archivstatus') === 'restore' && $detail['archived_at'] === null): ?><p class="notice" role="status">Ticket aus dem Archiv geholt.</p><?php endif ?>
     <?php if ($detail): ?>
       <?php $closedTicket = $detail['status'] === 'Erledigt'; ?>
       <header class="panel detail ticket-heading<?= $closedTicket ? ' ticket-heading-closed' : '' ?>">
         <div>
-          <p class="meta ticket-reference"><?= h(ticketCode((int) $detail['id'])) ?><?php if (!$closedTicket): ?> · <span class="badge"><?= h($detail['status']) ?></span><?php endif ?></p>
+          <p class="meta ticket-reference"><?= h(ticketCode((int) $detail['id'], $detail['ticket_number'])) ?><?php if (!$closedTicket): ?> · <span class="badge"><?= h($detail['status']) ?></span><?php endif ?><?php if ($admin && $detail['archived_at'] !== null): ?> · Im Archiv<?php endif ?></p>
           <h2><?= h($detail['subject']) ?></h2>
           <?php if ($closedTicket && $detail['closed_at'] !== null): ?>
             <p class="meta ticket-closed-at">Geschlossen am <time datetime="<?= h(date(DATE_ATOM, (int) $detail['closed_at'])) ?>"><?= h(date('d.m.Y \u\m H:i', (int) $detail['closed_at'])) ?> Uhr</time></p>
@@ -480,7 +504,19 @@ try {
           <?php if ($admin): ?><p class="meta"><?= h($detail['email']) ?></p><?php endif ?>
         </div>
         <?php if ($closedTicket): ?>
-          <span class="ticket-closed-status"><span class="ticket-closed-check" aria-hidden="true"></span>Erledigt</span>
+          <div class="ticket-heading-actions">
+            <span class="ticket-closed-status"><span class="ticket-closed-check" aria-hidden="true"></span>Erledigt</span>
+            <?php if ($admin): ?>
+              <form method="post">
+                <?= csrfInput() ?><input type="hidden" name="revision" value="<?= h($detail['revision']) ?>">
+                <?php if ($detail['archived_at'] === null): ?>
+                  <button class="secondary" name="action" value="archive">Archivieren</button>
+                <?php else: ?>
+                  <button class="secondary" name="action" value="restore">Aus Archiv holen</button>
+                <?php endif ?>
+              </form>
+            <?php endif ?>
+          </div>
         <?php elseif (!$admin): ?>
           <form method="post" action="?id=<?= h($detail['id']) ?>">
             <?= csrfInput() ?><button class="secondary" name="action" value="close">Ticket schließen</button>
@@ -619,13 +655,16 @@ try {
   <?php else: ?>
     <?php if ($admin): ?>
       <nav class="list-views" aria-label="Ansicht der Ticketübersicht">
-        <a class="button<?= $grouped || $onlyNew ? ' secondary' : '' ?>" href="?<?= h(http_build_query($filters)) ?>"<?= !$grouped && !$onlyNew ? ' aria-current="page"' : '' ?>>Alle Tickets</a>
+        <a class="button<?= $grouped || $onlyNew || $archiveView ? ' secondary' : '' ?>" href="?<?= h(http_build_query($filters)) ?>"<?= !$grouped && !$onlyNew && !$archiveView ? ' aria-current="page"' : '' ?>>Alle Tickets</a>
         <a class="button<?= $onlyNew ? '' : ' secondary' ?>" href="?neu=1"<?= $onlyNew ? ' aria-current="page"' : '' ?>>Neue Tickets (<?= h($unreadCount) ?>)</a>
         <a class="button<?= $grouped ? '' : ' secondary' ?>" href="?<?= h(http_build_query($filters + ['gruppe' => 'kunden'])) ?>"<?= $customerOverview ? ' aria-current="page"' : '' ?>>Nach Kunden gruppieren</a>
+        <a class="button<?= $archiveView ? '' : ' secondary' ?>" href="?archiv=1"<?= $archiveView ? ' aria-current="page"' : '' ?>>Archiv</a>
       </nav>
     <?php endif ?>
     <?php if (!empty($customerName)): ?>
       <h2><?= $customerFilter === 0 ? h($customerName) : 'Tickets für ' . h($customerName) ?></h2>
+    <?php elseif ($archiveView): ?>
+      <h2>Archiv</h2>
     <?php endif ?>
     <section class="panel listing">
       <form class="filters" method="get">
@@ -638,9 +677,10 @@ try {
         <?php if ($grouped): ?><input type="hidden" name="gruppe" value="kunden"><?php endif ?>
         <?php if ($customerFilter !== null): ?><input type="hidden" name="kunde" value="<?= h($customerFilter) ?>"><?php endif ?>
         <?php if ($onlyNew): ?><input type="hidden" name="neu" value="1"><?php endif ?>
+        <?php if ($archiveView): ?><input type="hidden" name="archiv" value="1"><?php endif ?>
       </form>
       <?php if (!$rows): ?>
-        <p class="empty"><?= $onlyNew ? 'Keine passenden neuen Tickets vorhanden.' : 'Keine passenden Tickets vorhanden.' ?></p>
+        <p class="empty"><?= $archiveView ? 'Keine passenden archivierten Tickets vorhanden.' : ($onlyNew ? 'Keine passenden neuen Tickets vorhanden.' : 'Keine passenden Tickets vorhanden.') ?></p>
       <?php elseif ($customerOverview): ?>
         <div class="table-wrap">
           <table>
@@ -674,7 +714,7 @@ try {
               <tr>
                 <td><a href="?<?= h(http_build_query(['id' => $row['id']] + $groupContext)) ?>"><?= h($row['subject']) ?></a>
                   <?php if ($admin && $row['is_new']): ?><span class="badge ticket-new">Neu</span><?php endif ?>
-                  <small><?= h(ticketCode((int) $row['id'])) ?><?= $admin ? ' · ' . h($row['email']) : '' ?></small>
+                  <small><?= h(ticketCode((int) $row['id'], $row['ticket_number'])) ?><?= $admin ? ' · ' . h($row['email']) : '' ?></small>
                   <?php if ($admin && $row['customer_name'] !== null): ?><small><?= h($row['customer_name']) ?></small><?php endif ?>
                 </td>
                 <?php if ($admin): ?>

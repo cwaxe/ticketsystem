@@ -9,7 +9,7 @@ const MAX_COMMENT_LENGTH = 4000;
 const MAX_CUSTOMER_NAME_LENGTH = 120;
 const MAX_MAIL_SIGNATURE_LENGTH = 2000;
 const DEFAULT_MAIL_SIGNATURE = 'IT-Service Waxenberger';
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 function emailAddress(string $address): ?string
 {
@@ -79,9 +79,44 @@ function mailSignature(PDO $db): string
     return $signature === false ? DEFAULT_MAIL_SIGNATURE : $signature;
 }
 
-function ticketCode(int $id): string
+function ticketCode(int $id, ?string $number = null): string
 {
-    return 'T-' . str_pad((string) $id, 4, '0', STR_PAD_LEFT);
+    return $number ?? ('T-' . str_pad((string) $id, 4, '0', STR_PAD_LEFT));
+}
+
+function createTicket(PDO $db, string $email, string $subject, string $body, array $options = []): int
+{
+    $ownsTransaction = !$db->inTransaction();
+    if ($ownsTransaction) {
+        $db->beginTransaction();
+    }
+    try {
+        $now = new DateTimeImmutable('now', new DateTimeZone('Europe/Berlin'));
+        query($db, 'INSERT INTO tickets (email, subject, body, attachment_notice, status, priority, due, notes, received_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+            $email, $subject, $body, $options['attachments'] ?? 0, $options['status'] ?? 'Offen',
+            $options['priority'] ?? 'Normal', $options['due'] ?? '', $options['notes'] ?? '', $now->getTimestamp(),
+        ]);
+        $ticket = (int) $db->lastInsertId();
+        $prefix = 'T-' . $now->format('Y') . '-';
+        for ($attempt = 0; $attempt < 8; $attempt++) {
+            $number = $prefix . random_int(10000000, 99999999);
+            $assigned = query($db, 'INSERT INTO ticket_numbers (ticket_id, number) VALUES (?, ?)
+                ON CONFLICT(number) DO NOTHING', [$ticket, $number]);
+            if ($assigned->rowCount() > 0) {
+                if ($ownsTransaction) {
+                    $db->commit();
+                }
+                return $ticket;
+            }
+        }
+        throw new RuntimeException('Es konnte keine eindeutige Ticketnummer vergeben werden.');
+    } catch (Throwable $error) {
+        if ($ownsTransaction) {
+            $db->rollBack();
+        }
+        throw $error;
+    }
 }
 
 function assignTicketCustomer(PDO $db, int $ticket, int $revision, int $customer, string $name): bool
@@ -244,9 +279,7 @@ function storeImportedMessage(PDO $db, ?array $mail, string $mailbox, string $va
                         [$ticket, replyComment($mail), time()]);
                     queueCommentNotification($db, $ticket, (int) $db->lastInsertId(), $adminEmail, 'admin');
                 } else {
-                    query($db, 'INSERT INTO tickets (email, subject, body, attachment_notice, received_at) VALUES (?, ?, ?, ?, ?)',
-                        [$mail['email'], $mail['subject'], $mail['body'], $mail['attachments'], time()]);
-                    $ticket = (int) $db->lastInsertId();
+                    $ticket = createTicket($db, $mail['email'], $mail['subject'], $mail['body'], ['attachments' => $mail['attachments']]);
                     query($db, 'INSERT INTO unread_tickets (ticket_id) VALUES (?)', [$ticket]);
                     queueMail($db, $mail['email'], 'customer', $ticket);
                     queueMail($db, $adminEmail, 'admin', $ticket);
