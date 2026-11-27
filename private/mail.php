@@ -17,7 +17,7 @@ function encodeMailPart(string $content): string
     return quoted_printable_encode(preg_replace("/\r\n|\r|\n/", "\r\n", $content));
 }
 
-function renderHtmlMail(string $baseUrl, string $subject, string $body, string $signature, ?string $logoCid = null): string
+function renderHtmlMail(string $baseUrl, string $subject, string $body, string $signature, ?string $logoCid = null, ?string $status = null): string
 {
     $escape = static fn (string $text): string => htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     $body = preg_replace("/\r\n|\r/", "\n", $body);
@@ -39,9 +39,25 @@ function renderHtmlMail(string $baseUrl, string $subject, string $body, string $
         $sections .= '<p style="margin:0 0 16px">' . implode('<br>', $content) . '</p>';
     }
     $heading = $escape($subject);
+    $statusColors = match ($status) {
+        'Offen' => ['#2756a8', '#e8efff', '#183a76'],
+        'In Arbeit' => ['#6847a5', '#f0eafa', '#462c73'],
+        'Wartet' => ['#a06609', '#fff2d6', '#744500'],
+        'Erledigt' => ['#288250', '#e0f3e7', '#145535'],
+        default => null,
+    };
+    $accent = $statusColors[0] ?? '#0d3082';
+    $statusBadge = '';
+    if ($statusColors !== null) {
+        [, $background, $foreground] = $statusColors;
+        $check = $status === 'Erledigt' ? '&#10003;&nbsp; ' : '';
+        $statusBadge = '<div style="margin:0 0 16px"><span style="display:inline-block;padding:4px 11px;border:1px solid '
+            . $accent . ';border-radius:16px;background-color:' . $background . ';color:' . $foreground . ';font-weight:bold">'
+            . $check . $escape($status) . '</span></div>';
+    }
     $header = $logoCid === null
-        ? '<td style="padding:18px 24px;background:#0d3082;color:#ffffff;font-size:16px;font-weight:bold">Ticketportal</td>'
-        : '<td style="padding:12px 24px;border-bottom:3px solid #0d3082"><img src="cid:' . $escape($logoCid)
+        ? '<td style="padding:18px 24px;background:' . $accent . ';color:#ffffff;font-size:16px;font-weight:bold">Ticketportal</td>'
+        : '<td style="padding:12px 24px;border-bottom:3px solid ' . $accent . '"><img src="cid:' . $escape($logoCid)
             . '" width="175" height="60" alt="IT-Service Waxenberger" style="display:block;border:0"></td>';
     $footer = $signature === '' ? '' : '<div style="border-top:1px solid #d3def3;padding-top:16px;margin-top:24px;color:#294475">'
         . nl2br($escape($signature), false) . '</div>';
@@ -56,7 +72,7 @@ function renderHtmlMail(string $baseUrl, string $subject, string $body, string $
       <tr>{$header}</tr>
       <tr><td style="padding:24px;font-size:16px;line-height:1.55">
         <h1 style="margin:0 0 20px;font-size:22px;line-height:1.3;color:#0d3082">{$heading}</h1>
-        {$sections}{$footer}
+        {$statusBadge}{$sections}{$footer}
       </td></tr>
     </table>
   </td></tr>
@@ -85,7 +101,7 @@ function smtpSend(array $config, string $address, string $subject, string $body,
     $logo = ($config['show_company_logo'] ?? false) ? @file_get_contents(dirname(__DIR__) . '/public/logo.png') : false;
     $logoCid = $logo === false ? null : $boundary . '@' . emailDomain($sender);
     $body = trim($body);
-    $html = renderHtmlMail($config['base_url'], $subject, $body, $signature, $logoCid);
+    $html = renderHtmlMail($config['base_url'], $subject, $body, $signature, $logoCid, $config['notification_status'] ?? null);
     $plain = $signature === '' ? $body : $body . "\n\n" . $signature;
     if (preg_match('/[^\x20-\x7e]/', $subject)) {
         $subject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
@@ -204,7 +220,8 @@ function deliverOutbox(PDO $db, array $config, ?callable $send = null): array
         }
         [$subject, $body] = outboxMessage($db, $config, $row);
         try {
-            $send(['show_company_logo' => $row['new_status'] !== null] + $config, $row['email'], $subject, $body, $id);
+            $send(['show_company_logo' => $row['new_status'] !== null, 'notification_status' => $row['new_status']] + $config,
+                $row['email'], $subject, $body, $id);
             query($db, 'DELETE FROM outbox WHERE id = ?', [$id]);
             $sent++;
         } catch (RuntimeException $error) {

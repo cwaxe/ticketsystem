@@ -131,7 +131,17 @@ Die Verwaltung kann beim Speichern einer Statusänderung einen optionalen Kunden
 
 Die Kennzeichnung **Neu** in der Ticketübersicht verwendet dunkelblauen Hintergrund und weiße Schrift.
 
-Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Statuskommentar.zip`.
+Paket: `Waxenberger-Ticketportal-Vollpaket-Statuskommentar.zip`.
+
+## 15. Abschlussreihenfolge und Statusfarben in E-Mails
+
+Ein Abschlusskommentar steht im Verlauf vor dem grünen Erledigt-Eintrag. Antworten, die später eingehen, erscheinen weiterhin zu ihrem tatsächlichen Zeitpunkt.
+
+Die HTML-Statusmail kennzeichnet Offen blau, In Arbeit violett, Wartet bernsteinfarben und Erledigt grün mit Haken. Logo, Textfassung und Antwortzuordnung bleiben verfügbar.
+
+Die Portal- und SMTP-Tests prüften die Reihenfolge, die Kombination von Status und Kommentar sowie die Farben und das eingebettete Logo.
+
+Aktuelles Vollpaket: `Waxenberger-Ticketportal-Vollpaket-Statusfarben.zip`.
 
 ## Installation und Betrieb
 

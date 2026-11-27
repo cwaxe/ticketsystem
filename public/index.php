@@ -263,12 +263,12 @@ try {
         $detail = query($db, 'SELECT t.*, c.closed_at FROM tickets t LEFT JOIN ticket_closures c ON c.ticket_id = t.id
             WHERE t.id = ?' . ($admin ? '' : ' AND t.email = ?'), $parameters)->fetch();
         if ($detail) {
-            $conversation = query($db, 'SELECT role, body, created_at, id, NULL AS old_status, NULL AS new_status, 0 AS status_event
+            $conversation = query($db, "SELECT role, body, created_at, id, NULL AS old_status, NULL AS new_status, 0 AS status_event, 1 AS event_order
                 FROM ticket_comments WHERE ticket_id = ?
                 UNION ALL
-                SELECT role, NULL, created_at, id, old_status, new_status, 1
+                SELECT role, NULL, created_at, id, old_status, new_status, 1, CASE WHEN new_status = 'Erledigt' THEN 2 ELSE 0 END
                 FROM ticket_status_history WHERE ticket_id = ?
-                ORDER BY created_at, status_event DESC, id', [$id, $id])->fetchAll();
+                ORDER BY created_at, event_order, id", [$id, $id])->fetchAll();
             if ($admin) {
                 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET') {
                     query($db, 'DELETE FROM unread_tickets WHERE ticket_id = ?', [$id]);
